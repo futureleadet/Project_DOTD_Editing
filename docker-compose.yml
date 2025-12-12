@@ -1,8 +1,16 @@
 services:
+  # Frontend builder
+  frontend-builder:
+    image: node:20-slim
+    working_dir: /app/react
+    volumes:
+      - ./:/app
+    command: sh -c "npm install && npm run build"
+
   # PostgreSQL with pgvector
   db_postgresql:
     image: pgvector/pgvector:pg16
-    container_name: postgresql_db
+    container_name: postgresql_database
     ports:
       - "5432:5432"
     environment:
@@ -32,17 +40,17 @@ services:
       # - N8N_USER_FOLDER=/apps/learn_n8ns
       - N8N_HOST=0.0.0.0
       # Webhook Production URL 설정
-      - WEBHOOK_URL=http://localhost:5678/
-      # 또는 도메인이 있다면: - WEBHOOK_URL=https://yourdomain.com/
+      - WEBHOOK_URL=http://n8n.nemone.store/
+      # 또는 도메인이 있다면: - WEBHOOK_URL=https://n8n.nemone.store/
       # Editor Base URL (선택사항이지만 권장)
-      - N8N_EDITOR_BASE_URL=http://localhost:5678/      
+      - N8N_EDITOR_BASE_URL=http://n8n.nemone.store/      
       
   # FastAPI application
   app_fastapi:
     build:
       context: .
       dockerfile: Dockerfile.fastapi
-    container_name: fastapi_app
+    container_name: fastapi_app_jinja
     ports:
       - "8000:8000"
       - "5500:5500"
@@ -52,6 +60,10 @@ services:
     depends_on:
       db_postgresql:
         condition: service_healthy
+      frontend-builder:
+        condition: service_completed_successfully
+    volumes:
+      - ./:/app
     stdin_open: true
     tty: true
     command: sleep infinity
