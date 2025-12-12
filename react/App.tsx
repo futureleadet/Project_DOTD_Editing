@@ -237,7 +237,7 @@ const FeedPage = ({ onReport }: { onReport: () => void }) => {
 };
 
 // 4. Generate Page
-const GeneratePage = ({ onGenerate }: { onGenerate: (file: File, prompt: string) => void }) => {
+const GeneratePage = ({ onGenerate, setView }: { onGenerate: (file: File, prompt: string) => void; setView: (view: PageView) => void; }) => {
   const [prompt, setPrompt] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -254,7 +254,12 @@ const GeneratePage = ({ onGenerate }: { onGenerate: (file: File, prompt: string)
 
   return (
     <div className="p-4 pt-6 h-screen flex flex-col bg-white">
-      <h2 className="text-2xl font-bold mb-6">Create DOTD</h2>
+      <div className="flex items-center mb-6">
+        <button onClick={() => setView(PageView.HOME)} className="p-2 -ml-2 mr-2">
+          <ArrowLeftIcon className="w-6 h-6" />
+        </button>
+        <h2 className="text-2xl font-bold">Create DOTD</h2>
+      </div>
       
       {/* Prompt Input */}
       <div className="mb-6">
@@ -611,7 +616,7 @@ export default function App() {
       {/* View Routing */}
       {currentView === PageView.HOME && <HomePage setView={setView} />}
       {currentView === PageView.FEED && <FeedPage onReport={() => setReportModalOpen(true)} />}
-      {currentView === PageView.GENERATE && <GeneratePage onGenerate={handleGenerate} />}
+      {currentView === PageView.GENERATE && <GeneratePage onGenerate={handleGenerate} setView={setView} />}
       {currentView === PageView.LOADING && <LoadingPage />}
       {currentView === PageView.RESULT && <ResultPage result={generationResult} onRetry={() => setView(PageView.GENERATE)} onFeedUpload={() => {alert('Uploaded!'); setView(PageView.FEED)}} />}
       {currentView === PageView.LOGIN && <LoginPage onLogin={handleLogin} />}
