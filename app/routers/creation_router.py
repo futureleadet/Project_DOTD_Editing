@@ -1,14 +1,18 @@
-from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, BackgroundTasks, Request
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, BackgroundTasks, Request, status
 from fastapi.responses import RedirectResponse
 from app.services.creations_service import CreationsService
-from app.dependencies.auth import get_current_user
+from app.dependencies.auth import get_current_user, get_current_admin
 from app.dependencies.db_connection import get_db_connection
 from app.services import task_manager
 import asyncpg
 import httpx
 import io
 import base64
-from typing import List, Dict, Any, Optional
+import traceback # Import traceback module
+import uuid # Import uuid for unique filename generation
+import os # Import os module for file operations
+import uuid # Import uuid for unique filename generation
+from typing import List, Dict, Any, Optional # Keep this line
 
 router = APIRouter(prefix="/api", tags=["creations"])
 
@@ -36,6 +40,12 @@ async def process_creation_task(
         httpx_data = {}
         httpx_files = {}
 
+        # Extract gender, age_group, is_public from form_data for save_creation
+        prompt = form_data.get("prompt", "N/A")
+        gender = form_data.pop("gender", None)
+        age_group = form_data.pop("age_group", None)
+        is_public = form_data.pop("is_public", True) # Default to True
+
         for key, value in form_data.items():
             if key == 'image' and value:
                 # For image, prepare it for 'files' parameter
@@ -46,14 +56,34 @@ async def process_creation_task(
 
         # Call n8n webhook
         webhook_url = 'http://n8n.nemone.store/webhook/c6ebe062-d352-491d-8da3-a5fe2d3f6949'
+        
+        print(f"DEBUG: Task {task_id} - Attempting httpx.post to n8n webhook: {webhook_url}")
+        
         async with httpx.AsyncClient(timeout=300.0) as client:
-            n8n_response = await client.post(webhook_url, data=httpx_data, files=httpx_files)
-            n8n_response.raise_for_status()
-            result = n8n_response.json()
-            print("--- N8N DEBUG START ---")
-            print(f"Type of result: {type(result)}")
-            print(f"Full result: {result}")
-            print("--- N8N DEBUG END ---")
+            try:
+                n8n_response = await client.post(webhook_url, data=httpx_data, files=httpx_files)
+                n8n_response.raise_for_status() # Raise HTTPStatusError for bad responses (4xx or 5xx)
+                
+                # Capture raw response text for debugging JSONDecodeError
+                n8n_response_text = n8n_response.text
+                print(f"DEBUG: Task {task_id} - N8N raw response text (first 500 chars): {n8n_response_text[:500]}...")
+
+                try:
+                    result = n8n_response.json()
+                except json.JSONDecodeError as jde:
+                    print(f"ERROR: Task {task_id} - JSONDecodeError from n8n webhook: {jde}")
+                    print(f"ERROR: Task {task_id} - Raw N8N response text was: {n8n_response_text}")
+                    raise HTTPException(status_code=500, detail=f"N8N webhook returned non-JSON response. Error: {jde}. Raw response: {n8n_response_text[:100]}...")
+                
+                print(f"DEBUG: Task {task_id} - N8N webhook call successful.")
+
+            except httpx.RequestError as e:
+                print(f"ERROR: Task {task_id} - httpx.RequestError during n8n call: {e}")
+                raise HTTPException(status_code=500, detail=f"N8N webhook request failed: {e}")
+            except httpx.HTTPStatusError as e:
+                print(f"ERROR: Task {task_id} - httpx.HTTPStatusError from n8n: {e.response.status_code} - {e.response.text}")
+                raise HTTPException(status_code=e.response.status_code, detail=f"N8N webhook returned error: {e.response.text}")
+        
 
         # Process result from n8n (assuming base64 format)
         inline_data_part = result.get("candidates", [{}])[0].get("content", {}).get("parts", [])
@@ -64,32 +94,56 @@ async def process_creation_task(
                 break
         
         if not inline_data_found:
-            raise ValueError("Invalid response structure from n8n webhook")
+            raise ValueError("Invalid response structure from n8n webhook: inlineData not found")
 
         mime_type = inline_data_found["mimeType"]
         media_data_b64 = inline_data_found["data"]
         
         # Convert base64 to file-like object
         media_blob = b64_to_blob(media_data_b64, mime_type)
-        file_extension = mime_type.split('/')[-1]
+        file_extension = '.' + mime_type.split('/')[-1] # Ensure file extension includes the leading dot
         
-        # Save the creation to our database
-        new_creation = await service.save_creation(
+        # --- File Saving Logic (centralized) ---
+        # NOTE: This file saving logic is now within process_creation_task,
+        # and CreationsService.save_creation will be simplified to just save metadata.
+        upload_dir = "app/static/uploads"
+        os.makedirs(upload_dir, exist_ok=True)
+        unique_filename = f"{uuid.uuid4()}{file_extension}"
+        file_path_on_disk = os.path.join(upload_dir, unique_filename)
+        media_url_for_db = f"/static/uploads/{unique_filename}"
+
+        print(f"DEBUG: Task {task_id} - Attempting to save file to: {file_path_on_disk}")
+        try:
+            with open(file_path_on_disk, "wb") as buffer:
+                buffer.write(media_blob.getvalue()) # Use getvalue() for BytesIO
+            print(f"DEBUG: Task {task_id} - File saved successfully to {file_path_on_disk}")
+        except Exception as file_save_e:
+            print(f"ERROR: Task {task_id} - Failed to save file {file_path_on_disk}: {file_save_e}")
+            raise HTTPException(status_code=500, detail=f"Failed to save generated image to disk: {file_save_e}")
+        # --- End File Saving Logic ---
+
+        # Save the creation metadata to our database using the media_url
+        new_creation = await service.creations_repo.create_creation( # Directly use repo for simplicity here
             conn, 
             user_id, 
-            form_data.get("prompt", "N/A"), 
-            UploadFile(filename=f"upload.{file_extension}", file=media_blob)
+            media_url_for_db, # Use the directly saved URL
+            'image', # Fixed media_type for now, assuming image from webhook
+            prompt, 
+            gender=gender,
+            age_group=age_group,
+            is_public=is_public
         )
+        print(f"DEBUG: Task {task_id} - Creation metadata saved. New creation ID: {new_creation.get('id')}")
         
-        
-        task_manager.update_task_status(task_id, status="completed", result={
-            "creation": new_creation,
+        task_manager.update_task_status(task_id, status="completed", result={"creation": new_creation,
             "n8n_response": result
         })
+        print(f"DEBUG: Task {task_id} - Status updated to completed.")
 
     except Exception as e:
-        print(f"Task {task_id} failed: {e}")
-        task_manager.update_task_status(task_id, status="failed", result={"error": str(e)})
+        error_traceback = traceback.format_exc() # Get full traceback
+        print(f"ERROR: Task {task_id} failed with unhandled exception: {e}\nTraceback:\n{error_traceback}")
+        task_manager.update_task_status(task_id, status="failed", result={"error": str(e), "traceback": error_traceback})
     finally:
         if conn:
             await conn.close()
@@ -105,6 +159,7 @@ async def create_task(
     text: str = Form(...),
     gender: str = Form(""),
     age_group: str = Form(""),
+    is_public: bool = Form(True), # Added is_public form field
     image: Optional[UploadFile] = File(None)
 ):
     task_id = task_manager.create_task()
@@ -112,9 +167,10 @@ async def create_task(
     
     # Prepare form data for background task
     form_data = {
-        "prompt": text,
+        "prompt": text, # Renamed from 'text' to 'prompt' to match service
         "gender": gender,
         "age_group": age_group,
+        "is_public": is_public # Pass is_public
     }
     if image:
         form_data["image"] = {
@@ -134,7 +190,6 @@ async def create_task(
     # Return task ID immediately. Frontend will poll for status.
     return {"task_id": task_id}
 
-
 @router.get("/task_status/{task_id}")
 async def get_task_status(task_id: str):
     """
@@ -145,36 +200,99 @@ async def get_task_status(task_id: str):
         raise HTTPException(status_code=404, detail="Task not found")
     return task
 
-
-@router.post("/creations/upload")
-async def upload_creation(
-    prompt: str = Form(...),
-    file: UploadFile = File(...),
+@router.get("/users/me/creations", response_model=List[Dict[str, Any]])
+async def get_my_creations(
     current_user: dict = Depends(get_current_user),
     service: CreationsService = Depends(),
-    conn: asyncpg.Connection = Depends(get_db_connection)
-) -> Dict[str, Any]:
+    conn: asyncpg.Connection = Depends(get_db_connection),
+    limit: int = 10,
+    offset: int = 0
+):
     """
-    Handles the upload of a media file and its prompt,
-    saves it, and returns the new creation's data.
+    Returns a list of creations for the current logged-in user.
     """
-    try:
-        user_id = int(current_user["sub"])
-        new_creation = await service.save_creation(conn, user_id, prompt, file)
-        return new_creation
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to upload creation: {str(e)}")
-
+    user_id = int(current_user["sub"])
+    return await service.get_user_creations(conn, user_id, limit, offset)
 
 @router.get("/creations/feed", response_model=List[Dict[str, Any]])
 async def get_feed(
     service: CreationsService = Depends(),
+    conn: asyncpg.Connection = Depends(get_db_connection),
+    sort_by: str = "latest", # 'latest' or 'popular'
+    limit: int = 10,
+    offset: int = 0,
+    current_user: Optional[dict] = Depends(get_current_user) # Optional for feed, to check if liked
+):
+    """
+    Returns a list of all public creations for the feed, with sorting and pagination.
+    """
+    creations = await service.get_feed_creations(conn, sort_by, limit, offset)
+    
+    # If user is logged in, check if they liked each creation
+    if current_user:
+        user_id = int(current_user["sub"])
+        for creation in creations:
+            creation["is_liked"] = await service.check_if_liked(conn, creation["id"], user_id)
+    
+    return creations
+
+@router.get("/creations/picked", response_model=List[Dict[str, Any]])
+async def get_picked_creations_api(
+    service: CreationsService = Depends(),
+    conn: asyncpg.Connection = Depends(get_db_connection),
+    limit: int = 9 # As per user requirement
+):
+    """
+    Returns a list of admin-picked creations for the home screen.
+    """
+    return await service.get_picked_creations(conn, limit)
+
+@router.post("/creations/{creation_id}/like", status_code=status.HTTP_200_OK)
+async def like_creation(
+    creation_id: int,
+    current_user: dict = Depends(get_current_user),
+    service: CreationsService = Depends(),
     conn: asyncpg.Connection = Depends(get_db_connection)
 ):
     """
-    Returns a list of all creations for the public feed.
+    Allows a logged-in user to like a creation.
     """
-    return await service.get_feed_creations(conn)
+    user_id = int(current_user["sub"])
+    liked = await service.like_creation(conn, creation_id, user_id)
+    if not liked:
+        raise HTTPException(status_code=409, detail="Creation already liked by this user")
+    return {"message": "Creation liked successfully"}
+
+@router.delete("/creations/{creation_id}/like", status_code=status.HTTP_200_OK)
+async def unlike_creation(
+    creation_id: int,
+    current_user: dict = Depends(get_current_user),
+    service: CreationsService = Depends(),
+    conn: asyncpg.Connection = Depends(get_db_connection)
+):
+    """
+    Allows a logged-in user to unlike a creation.
+    """
+    user_id = int(current_user["sub"])
+    unliked = await service.unlike_creation(conn, creation_id, user_id)
+    if not unliked:
+        raise HTTPException(status_code=404, detail="Like not found for this user and creation")
+    return {"message": "Creation unliked successfully"}
+
+@router.post("/admin/creations/{creation_id}/pick", status_code=status.HTTP_200_OK)
+async def toggle_creation_pick(
+    creation_id: int,
+    current_admin: dict = Depends(get_current_admin), # Ensures only admin can access
+    service: CreationsService = Depends(),
+    conn: asyncpg.Connection = Depends(get_db_connection)
+):
+    """
+    Allows an admin to toggle the 'is_picked_by_admin' flag for a creation.
+    """
+    # current_admin is already validated by get_current_admin dependency
+    updated_status = await service.toggle_admin_pick(conn, creation_id, int(current_admin["sub"]))
+    return {"message": "Admin pick status toggled successfully", "is_picked_by_admin": updated_status["is_picked_by_admin"]}
+
 
 @router.delete("/creations/{creation_id}", response_model=Optional[Dict[str, Any]])
 async def delete_creation(

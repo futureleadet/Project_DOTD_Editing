@@ -1,5 +1,5 @@
 from app.repositories.creations_repository import CreationsRepository
-from fastapi import Depends, UploadFile, HTTPException
+from fastapi import Depends, UploadFile, HTTPException, status
 import asyncpg
 from typing import List, Dict, Any, Optional
 import os
@@ -14,7 +14,10 @@ class CreationsService:
         conn: asyncpg.Connection, 
         user_id: int, 
         prompt: str,
-        file: UploadFile
+        file: UploadFile,
+        gender: Optional[str] = None,
+        age_group: Optional[str] = None,
+        is_public: bool = True
     ) -> Dict[str, Any]:
         """
         Saves the uploaded file to the static directory, creates a public URL,
@@ -46,16 +49,53 @@ class CreationsService:
         
         # 6. Save metadata to DB
         new_creation = await self.creations_repo.create_creation(
-            conn, user_id, media_url, media_type, prompt
+            conn, user_id, media_url, media_type, prompt, gender, age_group, is_public
         )
         
         return new_creation
 
-    async def get_feed_creations(self, conn: asyncpg.Connection) -> List[Dict[str, Any]]:
+    async def get_user_creations(self, conn: asyncpg.Connection, user_id: int, limit: int = 10, offset: int = 0) -> List[Dict[str, Any]]:
+        """Retrieves creations for a specific user."""
+        return await self.creations_repo.get_user_creations(conn, user_id, limit, offset)
+
+    async def get_feed_creations(self, conn: asyncpg.Connection, sort_by: str = "latest", limit: int = 10, offset: int = 0) -> List[Dict[str, Any]]:
+        """Retrieves public creations for the feed, with sorting and pagination."""
+        return await self.creations_repo.get_feed_creations(conn, sort_by, limit, offset)
+
+    async def get_picked_creations(self, conn: asyncpg.Connection, limit: int = 9) -> List[Dict[str, Any]]:
+        """Retrieves creations picked by admin for the home screen."""
+        return await self.creations_repo.get_picked_creations(conn, limit)
+
+    async def toggle_admin_pick(self, conn: asyncpg.Connection, creation_id: int, current_user_id: int) -> Dict[str, Any]:
         """
-        Gets all creations for the public feed.
+        Toggles the is_picked_by_admin flag for a creation.
+        Requires admin role.
         """
-        return await self.creations_repo.get_all_creations(conn)
+        # First, check if the current user is an admin (assuming user_id lookup returns role)
+        # For simplicity, we'll assume a direct way to get role or admin status from current_user_id
+        # In a real app, this would involve a user service or a lookup
+        # For now, this service method will implicitly be called by an admin-protected route.
+        
+        # Get current status
+        creation = await self.creations_repo.get_creation_by_id(conn, creation_id)
+        if not creation:
+            raise HTTPException(status_code=404, detail="Creation not found")
+        
+        new_picked_status = not creation["is_picked_by_admin"]
+        updated_creation = await self.creations_repo.toggle_admin_pick(conn, creation_id, new_picked_status)
+        return {"id": creation_id, "is_picked_by_admin": updated_creation["is_picked_by_admin"]}
+
+    async def like_creation(self, conn: asyncpg.Connection, creation_id: int, user_id: int) -> bool:
+        """User likes a creation."""
+        return await self.creations_repo.add_like(conn, user_id, creation_id)
+    
+    async def unlike_creation(self, conn: asyncpg.Connection, creation_id: int, user_id: int) -> bool:
+        """User unlikes a creation."""
+        return await self.creations_repo.remove_like(conn, user_id, creation_id)
+    
+    async def check_if_liked(self, conn: asyncpg.Connection, creation_id: int, user_id: int) -> bool:
+        """Checks if a user has liked a specific creation."""
+        return await self.creations_repo.check_if_liked(conn, user_id, creation_id)
 
     async def delete_creation(self, conn: asyncpg.Connection, creation_id: int, user_id: int) -> Optional[Dict[str, Any]]:
         """

@@ -1,6 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { PageView, User, FeedItem, GenerationResult } from './types';
-import { createGenerationTask, getTaskStatus, loginWithEmail, registerWithEmail, setAuthToken, fetchCurrentUser } from './services/apiService';
+import { PageView, User, Creation, GenerationResult, Task } from './types';
+import { 
+  createGenerationTask, 
+  getTaskStatus, 
+  loginWithEmail, 
+  registerWithEmail, 
+  setAuthToken, 
+  fetchCurrentUser,
+  getCreationsForUser,
+  getFeedCreations,
+  getPickedCreations,
+  likeCreation,
+  unlikeCreation,
+  toggleAdminPick
+} from './services/apiService';
 import { 
   HomeIcon, 
   MagnifyingGlassIcon, 
@@ -10,11 +23,33 @@ import {
   ShareIcon,
   ArrowDownTrayIcon,
   EllipsisHorizontalIcon,
-  ExclamationTriangleIcon
+  ExclamationTriangleIcon,
+  HeartIcon
 } from '@heroicons/react/24/outline';
+import { HeartIcon as HeartIconFilled } from '@heroicons/react/24/solid';
 
 
 // --- COMPONENTS DEFINED IN-FILE FOR SIMPLICITY AS REQUESTED ---
+
+// Generic Modal Component
+interface ModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  children: React.ReactNode;
+}
+
+const Modal: React.FC<ModalProps> = ({ isOpen, onClose, children }) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[100]" onClick={onClose}>
+      <div className="relative p-4 rounded-lg shadow-lg max-w-lg max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
+        {children}
+      </div>
+    </div>
+  );
+};
+
 
 // 1. Navigation Bar
 const Navbar = ({ 
@@ -60,7 +95,7 @@ const Navbar = ({
       
       {/* Logout simulation for demo */}
       {isLoggedIn && (
-         <button onClick={() => setView(PageView.LOGIN)} className="flex flex-col items-center justify-center w-full h-full space-y-1 text-gray-400">
+         <button onClick={() => { setAuthToken(null); setView(PageView.LOGIN); }} className="flex flex-col items-center justify-center w-full h-full space-y-1 text-gray-400">
            <span className="text-[10px] font-mono">Exit</span>
          </button>
       )}
@@ -68,30 +103,30 @@ const Navbar = ({
   );
 };
 
-// 2. Home Page
-const HomePage = ({ setView }: { setView: (v: PageView) => void }) => {
-  const [activeTab, setActiveTab] = useState<'daily' | 'sense' | 'trendy'>('daily');
+// 2. Home Page (Updated for Admin Picks)
+const HomePage = ({ setView, user }: { setView: (v: PageView) => void; user: User }) => {
+  const [pickedCreations, setPickedCreations] = useState<Creation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const tabContent = {
-    daily: {
-      title: "Stage 1 — Minimal / Daily",
-      desc: "Basic, Kwan-kku, Soft",
-      img: "https://picsum.photos/seed/daily/600/800",
-      color: "bg-gray-100"
-    },
-    sense: {
-      title: "Stage 2 — Balanced / Sense",
-      desc: "Natural, Stylish, Kkuk-kkuk",
-      img: "https://picsum.photos/seed/sense/600/800",
-      color: "bg-stone-100"
-    },
-    trendy: {
-      title: "Stage 3 — Statement / Trendy",
-      desc: "Impact, Unique, High-Fashion",
-      img: "https://picsum.photos/seed/trendy/600/800",
-      color: "bg-zinc-200"
-    }
-  };
+  useEffect(() => {
+    const fetchPicked = async () => {
+      setLoading(true);
+      try {
+        const creations = await getPickedCreations();
+        setPickedCreations(creations);
+      } catch (err) {
+        setError("Failed to load picked creations.");
+        console.error("Failed to load picked creations:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchPicked();
+  }, []);
+
+  // Removed activeTab and tabContent for simplicity as per requirement.
+  // The main call to action Generate Outfit button remains.
 
   return (
     <div className="pb-20 pt-4">
@@ -103,35 +138,18 @@ const HomePage = ({ setView }: { setView: (v: PageView) => void }) => {
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex px-4 border-b border-gray-100 mb-6">
-        {['daily', 'sense', 'trendy'].map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab as any)}
-            className={`flex-1 pb-3 text-sm font-medium transition-colors relative ${
-              activeTab === tab ? 'text-black' : 'text-gray-400'
-            }`}
-          >
-            {tab.charAt(0).toUpperCase() + tab.slice(1)}
-            {activeTab === tab && (
-              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-black mx-auto w-1/2" />
-            )}
-          </button>
-        ))}
-      </div>
-
-      {/* Main Visual (GIF Simulation) */}
+      {/* Main Call to Action - Generate Outfit */}
       <div className="px-4 mb-10">
-        <div className={`relative aspect-[3/4] rounded-2xl overflow-hidden shadow-sm ${tabContent[activeTab].color} group`}>
+        <div className="relative aspect-[3/4] rounded-2xl overflow-hidden shadow-sm bg-gray-100 group">
+          {/* This section could be an intro image or promotional */}
           <img 
-            src={tabContent[activeTab].img} 
-            alt={activeTab} 
+            src="https://picsum.photos/seed/home_intro/600/800" 
+            alt="Generate your own style" 
             className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex flex-col justify-end p-6">
-            <p className="text-white/80 text-xs mb-1 uppercase tracking-widest font-semibold">{tabContent[activeTab].desc}</p>
-            <h2 className="text-white text-2xl font-bold">{tabContent[activeTab].title}</h2>
+            <h2 className="text-white text-2xl font-bold">Discover Your Daily Outfit</h2>
+            <p className="text-white/80 text-xs mb-1 uppercase tracking-widest font-semibold">AI Powered Style Generation</p>
           </div>
         </div>
         
@@ -139,29 +157,26 @@ const HomePage = ({ setView }: { setView: (v: PageView) => void }) => {
           onClick={() => setView(PageView.GENERATE)}
           className="w-full bg-black text-white mt-4 py-4 rounded-xl font-bold text-lg hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
         >
-          <span>Generate Outfit</span>
+          <span>Generate My Outfit</span>
           <ArrowDownTrayIcon className="w-5 h-5 -rotate-90" />
         </button>
       </div>
 
-      {/* Staff Picks (Horizontal Scroll) */}
+      {/* Admin Picks - 3x3 Grid */}
       <div className="mb-8">
         <div className="px-4 mb-4 flex justify-between items-end">
-          <h3 className="font-bold text-lg">Staff Picks</h3>
-          <span className="text-xs text-gray-400 cursor-pointer">View All</span>
+          <h3 className="font-bold text-lg">Editor's Picks</h3> {/* Renamed from Staff Picks */}
+          {/* "View All" button removed as per requirement */}
         </div>
-        <div className="flex overflow-x-auto gap-4 px-4 no-scrollbar pb-4">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className="flex-shrink-0 w-32 md:w-40 flex flex-col gap-2">
-              <div className="aspect-[3/4] rounded-lg overflow-hidden bg-gray-200">
-                <img src={`https://picsum.photos/seed/staff${i}/300/400`} className="w-full h-full object-cover" alt="Staff Pick"/>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-5 h-5 rounded-full bg-gray-300 overflow-hidden">
-                  <img src={`https://picsum.photos/seed/avatar${i}/100`} alt="avatar" />
-                </div>
-                <span className="text-xs font-medium truncate">Stylist_{i}</span>
-              </div>
+        {loading && <p className="text-center text-gray-500">Loading editor's picks...</p>}
+        {error && <p className="text-center text-red-500">{error}</p>}
+        {!loading && !error && pickedCreations.length === 0 && (
+          <p className="text-center text-gray-500">No editor's picks available yet.</p>
+        )}
+        <div className="grid grid-cols-3 gap-1 px-4">
+          {pickedCreations.map((creation) => (
+            <div key={creation.id} className="aspect-square rounded-lg overflow-hidden bg-gray-200">
+              <img src={creation.media_url} alt={creation.prompt} className="w-full h-full object-cover"/>
             </div>
           ))}
         </div>
@@ -170,17 +185,114 @@ const HomePage = ({ setView }: { setView: (v: PageView) => void }) => {
   );
 };
 
-// 3. Feed Page
-const FeedPage = ({ onReport }: { onReport: () => void }) => {
-  const [filter, setFilter] = useState<'popular' | 'latest'>('popular');
-  const [subFilter, setSubFilter] = useState('All');
+// 3. Feed Page (Updated for dynamic content, sorting, liking, admin pick)
+const FeedPage = ({ user, setView }: { user: User; setView: (v: PageView) => void }) => {
+  const [filter, setFilter] = useState<'popular' | 'latest'>('latest');
+  const [creations, setCreations] = useState<Creation[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [offset, setOffset] = useState(0);
+  const limit = 10; // Number of items to fetch per scroll
+  const observer = useRef<IntersectionObserver>();
+  const lastCreationElementRef = useRef<HTMLDivElement>(null);
+  
+  const [selectedCreation, setSelectedCreation] = useState<Creation | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
-  const feedItems = Array.from({ length: 12 }).map((_, i) => ({
-    id: i.toString(),
-    height: i % 2 === 0 ? 'h-64' : 'h-48', // Masonry variation
-    image: `https://picsum.photos/seed/feed${i}/400/${i % 2 === 0 ? 600 : 400}`,
-    likes: Math.floor(Math.random() * 500)
-  }));
+  const fetchCreations = async (currentOffset: number, currentFilter: 'popular' | 'latest', replace: boolean = false) => {
+    if (!hasMore && !replace) return;
+    setLoading(true);
+    try {
+      const newCreations = await getFeedCreations(currentFilter, limit, currentOffset);
+      if (replace) {
+        setCreations(newCreations);
+      } else {
+        setCreations(prev => [...prev, ...newCreations]);
+      }
+      setHasMore(newCreations.length === limit);
+      setOffset(currentOffset + newCreations.length);
+    } catch (error) {
+      console.error("Failed to fetch feed creations:", error);
+      setHasMore(false); // Stop trying to load more if there's an error
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    // Reset and fetch when filter changes
+    setCreations([]);
+    setOffset(0);
+    setHasMore(true);
+    fetchCreations(0, filter, true);
+  }, [filter]);
+
+  useEffect(() => {
+    if (loading) return;
+    if (observer.current) observer.current.disconnect();
+
+    observer.current = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && hasMore) {
+        fetchCreations(offset, filter);
+      }
+    }, { threshold: 0.5 }); // Trigger when 50% of the last element is visible
+
+    if (lastCreationElementRef.current) {
+      observer.current.observe(lastCreationElementRef.current);
+    }
+    return () => observer.current?.disconnect();
+  }, [loading, hasMore, offset, filter]); // Rerun when these change
+
+  const handleLike = async (creationId: string, isLiked: boolean) => {
+    if (!user.isLoggedIn) {
+      alert("Please log in to like creations.");
+      setView(PageView.LOGIN);
+      return;
+    }
+    try {
+      if (isLiked) {
+        await unlikeCreation(creationId);
+      } else {
+        await likeCreation(creationId);
+      }
+      // Optimistically update UI
+      setCreations(prevCreations => prevCreations.map(c => 
+        c.id === creationId ? { ...c, is_liked: !isLiked, likes_count: c.likes_count + (isLiked ? -1 : 1) } : c
+      ));
+    } catch (error) {
+      console.error("Failed to toggle like:", error);
+      alert("Failed to update like status.");
+    }
+  };
+
+  const handleAdminPick = async (creationId: string) => {
+    if (user.role !== "ADMIN") {
+        alert("You must be an admin to pick creations.");
+        return;
+    }
+    try {
+        await toggleAdminPick(creationId);
+        // Optimistically update UI
+        setCreations(prevCreations => prevCreations.map(c => 
+            c.id === creationId ? { ...c, is_picked_by_admin: !c.is_picked_by_admin } : c
+        ));
+        alert("Admin pick status updated.");
+    } catch (error) {
+        console.error("Failed to toggle admin pick:", error);
+        alert("Failed to update admin pick status.");
+    }
+  };
+
+  const openModal = (creation: Creation) => {
+    setSelectedCreation(creation);
+    setIsModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setSelectedCreation(null);
+    setIsModalOpen(false);
+  };
+
 
   return (
     <div className="pb-20 pt-4 px-2">
@@ -200,7 +312,8 @@ const FeedPage = ({ onReport }: { onReport: () => void }) => {
             Latest
           </button>
         </div>
-        <div className="flex gap-2 overflow-x-auto no-scrollbar px-2">
+        {/* Sub-filters removed as per requirement, or can be added later if needed */}
+        {/* <div className="flex gap-2 overflow-x-auto no-scrollbar px-2">
           {['All', 'General', 'Basic', 'Stylish', 'Unique'].map(tag => (
             <button
               key={tag}
@@ -212,36 +325,98 @@ const FeedPage = ({ onReport }: { onReport: () => void }) => {
               {tag}
             </button>
           ))}
-        </div>
+        </div> */}
       </div>
 
       {/* Masonry Feed */}
       <div className="columns-2 gap-2 space-y-2">
-        {feedItems.map((item) => (
-          <div key={item.id} className="break-inside-avoid relative group rounded-lg overflow-hidden">
-            <img src={item.image} alt="Feed" className="w-full h-auto object-cover rounded-lg" />
+        {creations.map((creation, index) => (
+          <div 
+            key={creation.id} 
+            className="break-inside-avoid relative group rounded-lg overflow-hidden cursor-pointer"
+            ref={index === creations.length - 1 ? lastCreationElementRef : null}
+            onClick={() => openModal(creation)}
+          >
+            <img src={creation.media_url} alt={creation.prompt} className="w-full h-auto object-cover rounded-lg" />
             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
-            <div className="absolute bottom-2 left-2 text-white text-xs font-bold drop-shadow-md flex items-center gap-1">
-               <span className="opacity-0 group-hover:opacity-100 transition-opacity">♥ {item.likes}</span>
+            
+            {/* Overlay for details on hover */}
+            <div className="absolute inset-0 flex flex-col justify-between p-3 opacity-0 group-hover:opacity-100 transition-opacity text-white text-xs font-medium bg-gradient-to-t from-black/60 to-transparent">
+                <div className="flex justify-end">
+                    {user.role === "ADMIN" && (
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); handleAdminPick(creation.id); }}
+                            className={`p-1 rounded-full ${creation.is_picked_by_admin ? 'bg-green-500' : 'bg-gray-500'} bg-opacity-75 backdrop-blur-sm`}
+                        >
+                            <PlusIcon className="w-4 h-4" /> {/* Or a distinct 'Pick' icon */}
+                        </button>
+                    )}
+                </div>
+                <div className="flex items-center gap-2">
+                    <div className="w-5 h-5 rounded-full bg-gray-300 overflow-hidden">
+                        <img src={creation.author_picture || 'https://picsum.photos/seed/avatar_default/100'} alt="avatar" className="w-full h-full object-cover" />
+                    </div>
+                    <span className="truncate">{creation.author_name || 'Anonymous'}</span>
+                </div>
             </div>
+
+            {/* Like button and count - always visible or on hover */}
+            <div className="absolute bottom-2 left-2 flex items-center gap-1 text-white text-xs font-bold drop-shadow-md">
+                <button onClick={(e) => { e.stopPropagation(); handleLike(creation.id, creation.is_liked || false); }}>
+                    {creation.is_liked ? <HeartIconFilled className="w-5 h-5 text-red-500" /> : <HeartIcon className="w-5 h-5" />}
+                </button>
+                <span>{creation.likes_count}</span>
+            </div>
+            
             <button 
-              onClick={(e) => { e.stopPropagation(); onReport(); }}
+              onClick={(e) => { e.stopPropagation(); /* onReport(); */ alert("Report functionality coming soon!"); }}
               className="absolute top-2 right-2 text-white opacity-0 group-hover:opacity-100 transition-opacity p-1 bg-black/20 rounded-full backdrop-blur-sm"
             >
               <EllipsisHorizontalIcon className="w-5 h-5" />
             </button>
           </div>
         ))}
+        {loading && <p className="text-center text-gray-500 col-span-2">Loading more creations...</p>}
+        {!hasMore && !loading && creations.length > 0 && <p className="text-center text-gray-500 col-span-2">You've reached the end!</p>}
       </div>
+
+      <Modal isOpen={isModalOpen} onClose={closeModal}>
+        {selectedCreation && (
+          <div className="bg-white p-4 rounded-lg shadow-xl w-full max-w-md">
+            <img src={selectedCreation.media_url} alt={selectedCreation.prompt} className="w-full rounded-lg mb-4" />
+            <h3 className="text-xl font-bold mb-2">{selectedCreation.prompt}</h3>
+            <p className="text-sm text-gray-700 mb-2">by {selectedCreation.author_name || 'Anonymous'}</p>
+            <p className="text-xs text-gray-500">Gender: {selectedCreation.gender || 'N/A'}, Age Group: {selectedCreation.age_group || 'N/A'}</p>
+            <div className="flex items-center gap-2 mt-4">
+                <button onClick={(e) => { e.stopPropagation(); handleLike(selectedCreation.id, selectedCreation.is_liked || false); }}>
+                    {selectedCreation.is_liked ? <HeartIconFilled className="w-6 h-6 text-red-500" /> : <HeartIcon className="w-6 h-6" />}
+                </button>
+                <span>{selectedCreation.likes_count} Likes</span>
+            </div>
+            {user.role === "ADMIN" && (
+                <button 
+                    onClick={(e) => { e.stopPropagation(); handleAdminPick(selectedCreation.id); }}
+                    className={`mt-4 w-full py-2 rounded-lg text-sm font-medium ${selectedCreation.is_picked_by_admin ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-700'}`}
+                >
+                    {selectedCreation.is_picked_by_admin ? 'Unpick from Admin' : 'Pick for Admin'}
+                </button>
+            )}
+            <button onClick={closeModal} className="mt-4 w-full bg-black text-white py-2 rounded-lg">Close</button>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };
 
-// 4. Generate Page
-const GeneratePage = ({ onGenerate, setView }: { onGenerate: (file: File, prompt: string) => void; setView: (view: PageView) => void; }) => {
+// 4. Generate Page (Updated with new form fields)
+const GeneratePage = ({ onGenerate, setView, user }: { onGenerate: (file: File, prompt: string, gender: string, age_group: string, is_public: boolean) => void; setView: (view: PageView) => void; user: User }) => {
   const [prompt, setPrompt] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  const [gender, setGender] = useState('female'); // Default value
+  const [ageGroup, setAgeGroup] = useState('20s'); // Default value
+  const [isPublic, setIsPublic] = useState(true); // Default to public
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -253,8 +428,16 @@ const GeneratePage = ({ onGenerate, setView }: { onGenerate: (file: File, prompt
     }
   };
 
+  const handleSubmit = () => {
+    if (selectedFile && prompt) {
+        onGenerate(selectedFile, prompt, gender, ageGroup, isPublic);
+    } else {
+        alert("Please provide an image and a prompt.");
+    }
+  };
+
   return (
-    <div className="p-4 pt-6 h-screen flex flex-col bg-white">
+    <div className="p-4 pt-6 min-h-screen flex flex-col bg-white">
       <div className="flex items-center mb-6">
         <button onClick={() => setView(PageView.HOME)} className="p-2 -ml-2 mr-2">
           <ArrowLeftIcon className="w-6 h-6" />
@@ -264,13 +447,60 @@ const GeneratePage = ({ onGenerate, setView }: { onGenerate: (file: File, prompt
       
       {/* Prompt Input */}
       <div className="mb-6">
-        <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">My Style Request</label>
+        <label htmlFor="prompt" className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">My Style Request</label>
         <textarea 
+          id="prompt"
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           placeholder="ex. Going to a cafe in Hannam-dong, need a 'Kwan-kku' vibe..."
           className="w-full bg-gray-50 border border-gray-200 rounded-xl p-4 text-sm focus:outline-none focus:ring-2 focus:ring-black resize-none h-24"
         />
+      </div>
+
+      {/* Gender Selection */}
+      <div className="mb-6">
+        <label htmlFor="gender" className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Gender</label>
+        <select
+          id="gender"
+          value={gender}
+          onChange={(e) => setGender(e.target.value)}
+          className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+        >
+          <option value="male">Male</option>
+          <option value="female">Female</option>
+          <option value="unisex">Unisex</option>
+        </select>
+      </div>
+
+      {/* Age Group Selection */}
+      <div className="mb-6">
+        <label htmlFor="ageGroup" className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Age Group</label>
+        <select
+          id="ageGroup"
+          value={ageGroup}
+          onChange={(e) => setAgeGroup(e.target.value)}
+          className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+        >
+          <option value="10s">10s</option>
+          <option value="20s">20s</option>
+          <option value="30s">30s</option>
+          <option value="40s">40s</option>
+          <option value="50s+">50s+</option>
+        </select>
+      </div>
+
+      {/* Public/Private Toggle */}
+      <div className="mb-6 flex items-center">
+        <input
+          type="checkbox"
+          id="isPublic"
+          checked={isPublic}
+          onChange={(e) => setIsPublic(e.target.checked)}
+          className="h-4 w-4 text-black border-gray-300 rounded focus:ring-black"
+        />
+        <label htmlFor="isPublic" className="ml-2 block text-sm text-gray-900">
+          Make this creation public (visible in Feed)
+        </label>
       </div>
 
       {/* Image Upload Area */}
@@ -302,14 +532,15 @@ const GeneratePage = ({ onGenerate, setView }: { onGenerate: (file: File, prompt
            AI generated results may vary. Please review terms of service regarding content.
          </p>
          <button 
-           disabled={!selectedFile}
-           onClick={() => selectedFile && onGenerate(selectedFile, prompt)}
+           disabled={!selectedFile || !prompt || !user.isLoggedIn}
+           onClick={handleSubmit}
            className={`w-full py-4 rounded-xl font-bold text-lg transition-all ${
-             selectedFile ? 'bg-black text-white shadow-lg' : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+             (selectedFile && prompt && user.isLoggedIn) ? 'bg-black text-white shadow-lg' : 'bg-gray-200 text-gray-400 cursor-not-allowed'
            }`}
          >
            Generate Analysis
          </button>
+         {!user.isLoggedIn && <p className="text-red-500 text-xs text-center mt-2">Please log in to generate creations.</p>}
       </div>
     </div>
   );
@@ -345,7 +576,7 @@ const LoadingPage = () => {
   );
 };
 
-// 6. Result Page
+// 6. Result Page (Updated with Creation type)
 const ResultPage = ({ 
   result, 
   onRetry, 
@@ -353,15 +584,18 @@ const ResultPage = ({
 }: { 
   result: GenerationResult | null; 
   onRetry: () => void; 
-  onFeedUpload: () => void;
+  onFeedUpload: (creationId: string) => void;
 }) => {
-  if (!result) return null;
+  if (!result || !result.creation) return null;
+
+  // DEBUG: Log the result prop to inspect its structure
+  console.log("ResultPage received result:", result);
 
   return (
     <div className="min-h-screen bg-white pb-24 animate-fade-in">
       {/* Image Result */}
       <div className="relative w-full aspect-[3/4] bg-gray-100">
-        <img src={result.imageUrl} alt="Generated Outfit" className="w-full h-full object-cover" />
+        <img src={result.creation.media_url} alt="Generated Outfit" className="w-full h-full object-cover" />
         <div className="absolute top-4 left-4 bg-white/90 backdrop-blur px-3 py-1 rounded-full border border-gray-200">
           <span className="text-xs font-black tracking-widest">DOTD GENERATED</span>
         </div>
@@ -388,7 +622,8 @@ const ResultPage = ({
 
         {/* Tags */}
         <div className="flex flex-wrap gap-2 mb-6">
-          {result.tags.map((tag, idx) => (
+          {/* Display raw tags from n8n_response if analysis.tags is undefined */}
+          {(result.tags && result.tags.length > 0 ? result.tags : ['No tags parsed']).map((tag, idx) => (
             <span key={idx} className="bg-gray-100 text-gray-800 px-3 py-1 rounded-lg text-xs font-medium">
               {tag}
             </span>
@@ -399,12 +634,12 @@ const ResultPage = ({
         <div className="space-y-4 mb-8">
           <div className="bg-gray-50 p-4 rounded-xl">
             <h3 className="font-bold text-sm mb-2">✨ Stylist's Note</h3>
-            <p className="text-sm text-gray-600 leading-relaxed">{result.analysis}</p>
+            <p className="text-sm text-gray-600 leading-relaxed">{result.analysis || 'No analysis parsed.'}</p>
           </div>
           
           <div className="bg-stone-50 p-4 rounded-xl border border-stone-100">
              <h3 className="font-bold text-sm mb-2 text-stone-800">💡 Recommendation</h3>
-             <p className="text-sm text-stone-600 leading-relaxed">{result.recommendation}</p>
+             <p className="text-sm text-stone-600 leading-relaxed">{result.recommendation || 'No recommendation parsed.'}</p>
           </div>
         </div>
 
@@ -417,7 +652,7 @@ const ResultPage = ({
             Recreate
           </button>
           <button 
-            onClick={onFeedUpload}
+            onClick={() => onFeedUpload(result.creation.id)}
             className="py-3 bg-black text-white rounded-xl font-semibold text-sm hover:opacity-90 shadow-lg shadow-gray-200"
           >
             Upload to Feed
@@ -428,8 +663,8 @@ const ResultPage = ({
   );
 };
 
-// 7. Login Page (Refactored)
-const LoginPage = ({ onEmailLogin, onRegister }) => {
+// 7. Login Page (Refactored to handle Google OAuth click)
+const LoginPage = ({ onEmailLogin, onRegister }: { onEmailLogin: any; onRegister: any }) => {
   const [isLoginView, setIsLoginView] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -440,17 +675,20 @@ const LoginPage = ({ onEmailLogin, onRegister }) => {
     e.preventDefault();
     setError('');
     if (isLoginView) {
-      onEmailLogin(email, password).catch(err => setError(err.message));
+      onEmailLogin(email, password).catch((err: Error) => setError(err.message));
     } else {
       onRegister(name, email, password)
         .then(() => {
-          // On successful registration, switch to login view
           setIsLoginView(true);
-          // Optionally clear fields
           setPassword('');
         })
-        .catch(err => setError(err.message));
+        .catch((err: Error) => setError(err.message));
     }
+  };
+
+  const handleGoogleLoginClick = () => {
+    // Redirect to backend endpoint to initiate Google OAuth flow
+    window.location.href = '/auth/login/google';
   };
 
   return (
@@ -461,14 +699,14 @@ const LoginPage = ({ onEmailLogin, onRegister }) => {
           {isLoginView ? 'Log in to continue.' : 'Create an account.'}
         </p>
         
-        {/* Google Login remains an option */}
-        <a 
-          href="/auth/login/google"
+        {/* Google Login button */}
+        <button 
+          onClick={handleGoogleLoginClick}
           className="w-full bg-white border border-gray-300 text-gray-700 py-3 rounded-lg font-medium flex items-center justify-center gap-3 mb-4 hover:bg-gray-50 transition-colors"
         >
           <img src="https://www.svgrepo.com/show/475656/google-color.svg" className="w-5 h-5" alt="Google" />
           Continue with Google
-        </a>
+        </button>
         
         <div className="flex items-center gap-4 my-6">
           <div className="h-px bg-gray-200 flex-1"></div>
@@ -535,10 +773,78 @@ const LoginPage = ({ onEmailLogin, onRegister }) => {
   );
 };
 
-// 8. My Page
-const MyPage = ({ user, setView }: { user: User, setView: (v: PageView) => void }) => {
+// 8. My Page (Updated for dynamic content, infinite scroll, modal)
+const MyPage = ({ user, setView }: { user: User; setView: (v: PageView) => void }) => {
+  const [creations, setCreations] = useState<Creation[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [offset, setOffset] = useState(0);
+  const limit = 9; // Number of items to fetch per scroll
+  const observer = useRef<IntersectionObserver>();
+  const lastCreationElementRef = useRef<HTMLDivElement>(null);
+
+  const [selectedCreation, setSelectedCreation] = useState<Creation | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  const fetchCreations = async (currentOffset: number, replace: boolean = false) => {
+    if (!user.isLoggedIn || (!hasMore && !replace)) return;
+    setLoading(true);
+    try {
+      const newCreations = await getCreationsForUser(limit, currentOffset);
+      if (replace) {
+        setCreations(newCreations);
+      } else {
+        setCreations(prev => [...prev, ...newCreations]);
+      }
+      setHasMore(newCreations.length === limit);
+      setOffset(currentOffset + newCreations.length);
+    } catch (error) {
+      console.error("Failed to fetch user creations:", error);
+      setHasMore(false); // Stop trying to load more if there's an error
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user.isLoggedIn) {
+      setCreations([]);
+      setOffset(0);
+      setHasMore(true);
+      fetchCreations(0, true);
+    } else {
+      setCreations([]); // Clear creations if logged out
+    }
+  }, [user.isLoggedIn]);
+
+  useEffect(() => {
+    if (loading) return;
+    if (observer.current) observer.current.disconnect();
+
+    observer.current = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && hasMore) {
+        fetchCreations(offset);
+      }
+    }, { threshold: 0.5 });
+
+    if (lastCreationElementRef.current) {
+      observer.current.observe(lastCreationElementRef.current);
+    }
+    return () => observer.current?.disconnect();
+  }, [loading, hasMore, offset, user.isLoggedIn]);
+
+  const openModal = (creation: Creation) => {
+    setSelectedCreation(creation);
+    setIsModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setSelectedCreation(null);
+    setIsModalOpen(false);
+  };
+
   return (
-    <div className="pb-20 pt-6 px-4">
+    <div className="pb-20 pt-6 px-4 min-h-screen">
       <div className="flex items-center justify-between mb-8">
         <h2 className="text-xl font-bold">My Profile</h2>
         <button className="p-2" onClick={() => {/* Settings */}}>
@@ -548,18 +854,18 @@ const MyPage = ({ user, setView }: { user: User, setView: (v: PageView) => void 
 
       <div className="flex items-center gap-4 mb-8">
         <div className="w-20 h-20 rounded-full bg-gray-200 overflow-hidden border-2 border-white shadow-lg">
-           <img src={user.avatar} alt="Me" className="w-full h-full object-cover" />
+           <img src={user.avatar || 'https://picsum.photos/seed/default_avatar/100'} alt="Me" className="w-full h-full object-cover" />
         </div>
         <div>
           <h3 className="font-bold text-lg">{user.name}</h3>
-          <p className="text-xs text-gray-500">@{user.id} • Fashion Enthusiast</p>
+          <p className="text-xs text-gray-500">@{user.id} {user.role === 'ADMIN' ? '• Admin' : ''} • Fashion Enthusiast</p>
           <div className="flex gap-4 mt-3">
              <div className="text-center">
-                <span className="block font-bold text-sm">124</span>
+                <span className="block font-bold text-sm">N/A</span>
                 <span className="text-[10px] text-gray-400">Followers</span>
              </div>
              <div className="text-center">
-                <span className="block font-bold text-sm">42</span>
+                <span className="block font-bold text-sm">N/A</span>
                 <span className="text-[10px] text-gray-400">Following</span>
              </div>
           </div>
@@ -568,19 +874,47 @@ const MyPage = ({ user, setView }: { user: User, setView: (v: PageView) => void 
 
       <div className="mb-6 border-b border-gray-100 flex gap-6">
         <button className="pb-2 border-b-2 border-black font-bold text-sm">My DOTD</button>
-        <button className="pb-2 border-b-2 border-transparent text-gray-400 text-sm">Likes</button>
+        {/* <button className="pb-2 border-b-2 border-transparent text-gray-400 text-sm">Likes</button> */}
       </div>
 
+      {!user.isLoggedIn && <p className="text-center text-gray-500">Please log in to see your creations.</p>}
+      {user.isLoggedIn && loading && creations.length === 0 && <p className="text-center text-gray-500">Loading your creations...</p>}
+      {user.isLoggedIn && !loading && creations.length === 0 && <p className="text-center text-gray-500">You haven't created anything yet.</p>}
+
       <div className="grid grid-cols-3 gap-1">
-         {[1,2,3,4,5,6].map(i => (
-           <div key={i} className="aspect-square bg-gray-100 relative">
-             <img src={`https://picsum.photos/seed/my${i}/200`} className="w-full h-full object-cover" alt="gallery"/>
+         {creations.map((creation, index) => (
+           <div 
+             key={creation.id} 
+             className="aspect-square relative cursor-pointer"
+             ref={index === creations.length - 1 ? lastCreationElementRef : null}
+             onClick={() => openModal(creation)}
+           >
+             <img src={creation.media_url} className="w-full h-full object-cover" alt={creation.prompt}/>
            </div>
          ))}
       </div>
+      {loading && creations.length > 0 && <p className="text-center text-gray-500 mt-4">Loading more...</p>}
+      {!hasMore && !loading && creations.length > 0 && <p className="text-center text-gray-500 mt-4">No more creations.</p>}
+
+      <Modal isOpen={isModalOpen} onClose={closeModal}>
+        {selectedCreation && (
+          <div className="bg-white p-4 rounded-lg shadow-xl w-full max-w-md">
+            <img src={selectedCreation.media_url} alt={selectedCreation.prompt} className="w-full rounded-lg mb-4" />
+            <h3 className="text-xl font-bold mb-2">{selectedCreation.prompt}</h3>
+            <p className="text-sm text-gray-700 mb-2">Gender: {selectedCreation.gender || 'N/A'}, Age Group: {selectedCreation.age_group || 'N/A'}</p>
+            <p className="text-xs text-gray-500">Created: {new Date(selectedCreation.created_at).toLocaleString()}</p>
+            <div className="flex items-center gap-2 mt-4">
+                <HeartIconFilled className="w-6 h-6 text-red-500" />
+                <span>{selectedCreation.likes_count} Likes</span>
+            </div>
+            <button onClick={closeModal} className="mt-4 w-full bg-black text-white py-2 rounded-lg">Close</button>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };
+
 
 // --- MAIN APP COMPONENT ---
 
@@ -594,6 +928,25 @@ export default function App() {
   });
   const [reportModalOpen, setReportModalOpen] = useState(false);
   const [generationResult, setGenerationResult] = useState<GenerationResult | null>(null);
+
+  // Update user state when JWT payload is decoded
+  const updateUserFromToken = (token: string) => {
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      setUser({
+        id: payload.sub,
+        email: payload.email,
+        name: payload.name,
+        avatar: payload.picture,
+        role: payload.role,
+        isLoggedIn: true,
+      });
+    } catch(e) {
+      console.error("Error decoding token", e);
+      setUser({ id: 'guest', name: 'Guest User', isLoggedIn: false });
+      setAuthToken(null);
+    }
+  };
 
   useEffect(() => {
     const handleOAuthCallback = async () => {
@@ -615,20 +968,8 @@ export default function App() {
           
           if (access_token) {
             setAuthToken(access_token);
-            const currentUser = await fetchCurrentUser();
-            if (currentUser) {
-              setUser({
-                id: currentUser.sub,
-                name: currentUser.name,
-                avatar: currentUser.picture,
-                isLoggedIn: true,
-              });
-              setView(PageView.HOME); // Navigate to home or dashboard after successful login
-            } else {
-                setAuthToken(null);
-                setUser({ ...user, isLoggedIn: false });
-                setView(PageView.LOGIN);
-            }
+            updateUserFromToken(access_token); // Update user state from new token
+            setView(PageView.HOME); // Navigate to home or dashboard after successful login
           } else {
             throw new Error('No access token received from backend');
           }
@@ -642,12 +983,9 @@ export default function App() {
         const checkCurrentUser = async () => {
           const currentUser = await fetchCurrentUser();
           if (currentUser) {
-            setUser({
-              id: currentUser.sub,
-              name: currentUser.name,
-              avatar: currentUser.picture,
-              isLoggedIn: true,
-            });
+            updateUserFromToken(currentUser.access_token || ''); // Assuming fetchCurrentUser returns {access_token: "..."}
+            // Or if currentUser is already the payload:
+            // setUser({ id: currentUser.sub, email: currentUser.email, name: currentUser.name, avatar: currentUser.picture, role: currentUser.role, isLoggedIn: true });
             setView(PageView.HOME);
           }
         };
@@ -658,66 +996,80 @@ export default function App() {
     handleOAuthCallback();
   }, []);
 
-  const handleEmailLogin = async (email, password) => {
+  const handleEmailLogin = async (email: string, password: string) => {
     const { access_token } = await loginWithEmail(email, password);
     setAuthToken(access_token);
-    
-    // In a real app, you'd fetch user profile from a protected /users/me endpoint.
-    // For this demo, we'll decode the JWT to get user info.
-    // NOTE: This is insecure on the client-side for sensitive data, but fine for display data.
-    try {
-      const payload = JSON.parse(atob(access_token.split('.')[1]));
-      setUser({
-        id: payload.sub,
-        name: payload.name,
-        avatar: payload.picture,
-        isLoggedIn: true,
-      });
-      setView(PageView.HOME);
-    } catch(e) {
-      console.error("Error decoding token", e);
-      // Fallback to a generic user if token is malformed
-      setUser({ id: 'user', name: 'User', avatar: '', isLoggedIn: true });
-      setView(PageView.HOME);
-    }
+    updateUserFromToken(access_token);
+    setView(PageView.HOME);
   };
 
-  const handleRegister = async (name, email, password) => {
+  const handleRegister = async (name: string, email: string, password: string) => {
     await registerWithEmail(name, email, password);
-    // On success, show a message and let them log in.
     alert('Registration successful! Please log in.');
+    setView(PageView.LOGIN);
   };
 
-  const handleGenerate = async (file: File, prompt: string) => {
+  const handleGenerate = async (file: File, prompt: string, gender: string, age_group: string, is_public: boolean) => {
+    if (!user.isLoggedIn) {
+      alert("Please log in to generate creations.");
+      setView(PageView.LOGIN);
+      return;
+    }
     setView(PageView.LOADING);
 
     try {
       // 1. Create the task on the backend
-      // TODO: Add form fields for gender and age_group and pass them here
-      const { task_id } = await createGenerationTask(file, prompt, "female", "20s");
+      const { task_id } = await createGenerationTask(file, prompt, gender, age_group, is_public);
 
       // 2. Start polling for the result
       const intervalId = setInterval(async () => {
         try {
           const task = await getTaskStatus(task_id);
 
-          if (task.status === 'completed') {
+          if (task.status === 'completed' && task.result && task.result.creation) {
             clearInterval(intervalId);
             
             const creation = task.result.creation;
-            const analysis = task.result.n8n_response;
+            const n8nResponse = task.result.n8n_response;
+            
+            let parsedAnalysis = 'nothing'; // Default to 'nothing'
+            let parsedRecommendation = 'nothing'; // Default to 'nothing'
+            let parsedTags: string[] = [];
+
+            // Attempt to parse analysis, recommendation, and tags from the n8n text response
+            const textPart = n8nResponse?.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (textPart) {
+              // Regex to extract Analysis section - more flexible with newlines/spaces
+              const analysisMatch = textPart.match(/\*\*Analysis:\*\*[\s]*(.*?)(?=\s*\n\n\*\*Recommendation:\*\*|\s*\n\n\*\*Tags:\*\*|$)/is);
+              if (analysisMatch && analysisMatch[1] && analysisMatch[1].trim().length > 0) {
+                parsedAnalysis = analysisMatch[1].trim();
+              }
+
+              // Regex to extract Recommendation section - more flexible with newlines/spaces
+              const recommendationMatch = textPart.match(/\*\*Recommendation:\*\*[\s]*(.*?)(?=\s*\n\n\*\*Tags:\*\*|$)/is);
+              if (recommendationMatch && recommendationMatch[1] && recommendationMatch[1].trim().length > 0) {
+                parsedRecommendation = recommendationMatch[1].trim();
+              }
+
+              // Regex to extract Tags section - more flexible with newlines/spaces
+              const tagsMatch = textPart.match(/\*\*Tags:\*\*[\s]*(.*)/is);
+              if (tagsMatch && tagsMatch[1] && tagsMatch[1].trim().length > 0) {
+                // Split by #, filter out empty strings, and trim each tag
+                parsedTags = tagsMatch[1].split('#').map(tag => tag.trim()).filter(tag => tag.length > 0);
+              }
+            }
             
             setGenerationResult({
-              imageUrl: creation.media_url,
-              analysis: analysis.analysis,
-              recommendation: analysis.recommendation,
-              tags: analysis.tags
+              creation: creation,
+              analysis: parsedAnalysis,
+              recommendation: parsedRecommendation,
+              tags: parsedTags
             });
             setView(PageView.RESULT);
 
           } else if (task.status === 'failed') {
             clearInterval(intervalId);
-            alert("Generation failed. Please try again.");
+            // alert("Generation failed. Please try again."); // Removed alert to allow console inspection
             console.error("Task failed:", task.result);
             setView(PageView.GENERATE);
           }
@@ -737,7 +1089,7 @@ export default function App() {
   };
 
 
-  // Report Modal
+  // Report Modal (Unchanged)
   const ReportModal = () => (
     <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl w-full max-w-sm p-6 animate-slide-up">
@@ -757,7 +1109,7 @@ export default function App() {
              </button>
            ))}
         </div>
-        <button onClick={() => setReportModalOpen(false)} className="w-full py-3 bg-gray-100 rounded-xl font-bold text-sm">Cancel</button>
+        <button onClick={() => setReportModalOpen(false)} className="mt-4 w-full bg-black text-white py-2 rounded-lg">Cancel</button>
       </div>
     </div>
   );
@@ -765,11 +1117,11 @@ export default function App() {
   return (
     <div className="max-w-md mx-auto min-h-screen bg-white relative shadow-2xl overflow-hidden">
       {/* View Routing */}
-      {currentView === PageView.HOME && <HomePage setView={setView} />}
-      {currentView === PageView.FEED && <FeedPage onReport={() => setReportModalOpen(true)} />}
-      {currentView === PageView.GENERATE && <GeneratePage onGenerate={handleGenerate} setView={setView} />}
+      {currentView === PageView.HOME && <HomePage setView={setView} user={user} />}
+      {currentView === PageView.FEED && <FeedPage user={user} setView={setView} />}
+      {currentView === PageView.GENERATE && <GeneratePage onGenerate={handleGenerate} setView={setView} user={user} />}
       {currentView === PageView.LOADING && <LoadingPage />}
-      {currentView === PageView.RESULT && <ResultPage result={generationResult} onRetry={() => setView(PageView.GENERATE)} onFeedUpload={() => {alert('Uploaded!'); setView(PageView.FEED)}} />}
+      {currentView === PageView.RESULT && <ResultPage result={generationResult} onRetry={() => setView(PageView.GENERATE)} onFeedUpload={(creationId) => { alert(`Creation ${creationId} uploaded to feed!`); setView(PageView.FEED); }} />}
       {currentView === PageView.LOGIN && <LoginPage onEmailLogin={handleEmailLogin} onRegister={handleRegister} />}
       {currentView === PageView.MY_PAGE && <MyPage user={user} setView={setView} />}
 

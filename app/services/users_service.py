@@ -50,3 +50,16 @@ class UserService:
     async def get_user_creations(self, conn: asyncpg.Connection, user_id: int) -> List[Dict[str, Any]]:
         """Retrieves all creations for a specific user."""
         return await self.user_repo.get_creations_by_user_id(conn, user_id)
+    
+    async def get_all_users(self, conn: asyncpg.Connection) -> List[Dict[str, Any]]:
+        """Retrieves all users, excluding sensitive data."""
+        users = await self.user_repo.get_all_users(conn)
+        # Exclude hashed_password explicitly if the repo method didn't already
+        # (repo method already excludes it in select statement)
+        return users
+
+    async def get_user_by_id(self, conn: asyncpg.Connection, user_id: int) -> Optional[Dict[str, Any]]:
+        """Retrieves a single user by ID, excluding sensitive data."""
+        user = await self.user_repo.get_user_by_id(conn, user_id)
+        # Exclude hashed_password explicitly if the repo method didn't already
+        return user

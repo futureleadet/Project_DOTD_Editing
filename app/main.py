@@ -42,6 +42,9 @@ app.include_router(admin_router.router)
 app.include_router(user_router.router)
 app.include_router(creation_router.router)
 
+# Static files for user uploads
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
 # Static Files and Catch-all for SPA
 app.mount("/assets", StaticFiles(directory="react/dist/assets"), name="assets")
 
