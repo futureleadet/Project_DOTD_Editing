@@ -4,6 +4,8 @@ import asyncpg
 from typing import List, Dict, Any, Optional
 import os
 import uuid
+import base64 # Import base64 for decoding
+import io
 
 class CreationsService:
     def __init__(self, creations_repo: CreationsRepository = Depends()):
@@ -14,42 +16,58 @@ class CreationsService:
         conn: asyncpg.Connection, 
         user_id: int, 
         prompt: str,
-        file: UploadFile,
+        media_data_b64: str, # Changed from file: UploadFile
+        mime_type: str, # Added mime_type
+        original_filename: str = "upload", # Added original_filename
         gender: Optional[str] = None,
         age_group: Optional[str] = None,
-        is_public: bool = True
+        is_public: bool = True,
+        analysis_text: Optional[str] = None, # New
+        recommendation_text: Optional[str] = None, # New
+        tags_array: Optional[List[str]] = None # New
     ) -> Dict[str, Any]:
         """
-        Saves the uploaded file to the static directory, creates a public URL,
+        Saves the base64 encoded media data to the static directory, creates a public URL,
         and saves the creation metadata to the database.
         """
+        # --- Helper function to convert base64 to a BytesIO object (moved here) ---
+        def _b64_to_bytesio(b64_data: str):
+            byte_characters = base64.b64decode(b64_data)
+            return io.BytesIO(byte_characters)
+        # --- End Helper ---
+
         # 1. Define upload directory and ensure it exists
         upload_dir = "app/static/uploads"
         os.makedirs(upload_dir, exist_ok=True)
         
         # 2. Generate a unique filename
-        file_ext = os.path.splitext(file.filename)[1] if file.filename else ''
-        if not file_ext and file.content_type: # Fallback for blobs without filename
-            mime_to_ext = {'image/png': '.png', 'image/jpeg': '.jpg', 'video/mp4': '.mp4'}
-            file_ext = mime_to_ext.get(file.content_type, '')
+        file_ext = os.path.splitext(original_filename)[1] if original_filename else ''
+        if not file_ext and mime_type: # Fallback for blobs without filename in original_filename
+            mime_to_ext = {'image/png': '.png', 'image/jpeg': '.jpg', 'video/mp4': '.mp4', 'image/webp': '.webp'}
+            file_ext = mime_to_ext.get(mime_type, '')
+        if not file_ext: # Default to png if still no extension
+            file_ext = '.png'
 
         unique_filename = f"{uuid.uuid4()}{file_ext}"
         file_path = os.path.join(upload_dir, unique_filename)
         
-        # 3. Save the file
-        content = await file.read()
-        with open(file_path, "wb") as buffer:
-            buffer.write(content)
+        # 3. Decode base64 and save the file
+        try:
+            media_blob = _b64_to_bytesio(media_data_b64)
+            with open(file_path, "wb") as buffer:
+                buffer.write(media_blob.getvalue())
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to decode or save image file: {e}")
             
         # 4. Create public URL
         media_url = f"/static/uploads/{unique_filename}"
         
         # 5. Determine media type
-        media_type = 'video' if file.content_type and file.content_type.startswith('video') else 'image'
+        media_type = 'video' if mime_type and mime_type.startswith('video') else 'image'
         
         # 6. Save metadata to DB
         new_creation = await self.creations_repo.create_creation(
-            conn, user_id, media_url, media_type, prompt, gender, age_group, is_public
+            conn, user_id, media_url, media_type, prompt, gender, age_group, is_public, analysis_text, recommendation_text, tags_array
         )
         
         return new_creation
@@ -71,12 +89,7 @@ class CreationsService:
         Toggles the is_picked_by_admin flag for a creation.
         Requires admin role.
         """
-        # First, check if the current user is an admin (assuming user_id lookup returns role)
-        # For simplicity, we'll assume a direct way to get role or admin status from current_user_id
-        # In a real app, this would involve a user service or a lookup
-        # For now, this service method will implicitly be called by an admin-protected route.
-        
-        # Get current status
+        # First, get current status
         creation = await self.creations_repo.get_creation_by_id(conn, creation_id)
         if not creation:
             raise HTTPException(status_code=404, detail="Creation not found")
@@ -97,17 +110,17 @@ class CreationsService:
         """Checks if a user has liked a specific creation."""
         return await self.creations_repo.check_if_liked(conn, user_id, creation_id)
 
-    async def delete_creation(self, conn: asyncpg.Connection, creation_id: int, user_id: int) -> Optional[Dict[str, Any]]:
+    async def delete_creation(self, conn: asyncpg.Connection, creation_id: int, user_id: int, is_admin: bool = False) -> Optional[Dict[str, Any]]:
         """
-        Deletes a creation after verifying ownership and removing the associated file if it's local.
+        Deletes a creation after verifying ownership or if the caller is an admin.
         """
         # 1. Get the creation details
         creation_to_delete = await self.creations_repo.get_creation_by_id(conn, creation_id)
         if not creation_to_delete:
             raise HTTPException(status_code=404, detail="Creation not found")
 
-        # 2. Verify ownership
-        if creation_to_delete["user_id"] != user_id:
+        # 2. Verify ownership or admin status
+        if not is_admin and creation_to_delete["user_id"] != user_id:
             raise HTTPException(status_code=403, detail="Not authorized to delete this creation")
 
         # 3. Delete the physical file only if it is a local file

@@ -1,5 +1,5 @@
 // Service to interact with our FastAPI backend
-import { Task, Creation } from '../types';
+import { Task, Creation, User } from '../types';
 
 let token: string | null = null;
 
@@ -226,4 +226,103 @@ export const toggleAdminPick = async (creationId: string): Promise<any> => {
         throw new Error(errorData.detail || 'Server error');
     }
     return response.json();
+};
+
+// --- Admin APIs ---
+
+/**
+ * Fetches all users for admin view.
+ * @returns A promise that resolves to a list of User objects (without sensitive info).
+ */
+export const getAllUsers = async (): Promise<User[]> => {
+    const response = await fetchWithAuth('/admin/users');
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: 'Failed to fetch users' }));
+        throw new Error(errorData.detail || 'Server error');
+    }
+    return response.json();
+};
+
+/**
+ * Fetches all admin-picked creations for admin view.
+ * @returns A promise that resolves to a list of Creation objects.
+ */
+export const getAdminPickedCreations = async (): Promise<Creation[]> => {
+    const response = await fetchWithAuth('/admin/creations/picked');
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: 'Failed to fetch admin picked creations' }));
+        throw new Error(errorData.detail || 'Server error');
+    }
+    return response.json();
+};
+
+/**
+ * Allows an admin to delete a creation.
+ * @param creationId The ID of the creation to delete.
+ */
+export const deleteCreationAdmin = async (creationId: string): Promise<any> => {
+    const response = await fetchWithAuth(`/admin/creations/${creationId}`, {
+        method: 'DELETE'
+    });
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: 'Failed to delete creation' }));
+        throw new Error(errorData.detail || 'Server error');
+    }
+    return response.json();
+};
+
+
+
+/**
+
+ * Fetches the total number of users for admin stats.
+
+ * @returns A promise that resolves to an object with user_count.
+
+ */
+
+export const getUsersCountAdmin = async (): Promise<{ users_count: number }> => {
+
+    const response = await fetchWithAuth('/admin/stats/users_count');
+
+    if (!response.ok) {
+
+        const errorData = await response.json().catch(() => ({ detail: 'Failed to fetch user count' }));
+
+        throw new Error(errorData.detail || 'Server error');
+
+    }
+
+    return response.json();
+
+};
+
+
+
+/**
+
+ * Sets a specific creation as the main one for the discovery page.
+
+ * @param creationId The ID of the creation to set as main.
+
+ */
+
+export const setMainCreation = async (creationId: string): Promise<any> => {
+
+    const response = await fetchWithAuth(`/api/admin/creations/${creationId}/main`, {
+
+        method: 'POST'
+
+    });
+
+    if (!response.ok) {
+
+        const errorData = await response.json().catch(() => ({ detail: 'Failed to set main creation' }));
+
+        throw new Error(errorData.detail || 'Server error');
+
+    }
+
+    return response.json();
+
 };

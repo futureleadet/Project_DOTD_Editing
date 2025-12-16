@@ -12,7 +12,12 @@ import {
   getPickedCreations,
   likeCreation,
   unlikeCreation,
-  toggleAdminPick
+  toggleAdminPick,
+  getAllUsers, // New API call
+  getAdminPickedCreations, // New API call for admin feed management
+  deleteCreationAdmin, // New API call for admin delete
+  getUsersCountAdmin, // New API call for admin stats
+  setMainCreation
 } from './services/apiService';
 import { 
   HomeIcon, 
@@ -24,7 +29,9 @@ import {
   ArrowDownTrayIcon,
   EllipsisHorizontalIcon,
   ExclamationTriangleIcon,
-  HeartIcon
+  HeartIcon,
+  ShieldCheckIcon, // Admin icon
+  TrashIcon // Delete icon
 } from '@heroicons/react/24/outline';
 import { HeartIcon as HeartIconFilled } from '@heroicons/react/24/solid';
 
@@ -51,15 +58,17 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, children }) => {
 };
 
 
-// 1. Navigation Bar
+// 1. Navigation Bar (Updated for Admin Link)
 const Navbar = ({ 
   currentView, 
   setView, 
-  isLoggedIn 
+  isLoggedIn,
+  userRole // New prop for user role
 }: { 
   currentView: PageView; 
   setView: (v: PageView) => void; 
-  isLoggedIn: boolean 
+  isLoggedIn: boolean;
+  userRole?: string;
 }) => {
   const navItemClass = (view: PageView) => 
     `flex flex-col items-center justify-center w-full h-full space-y-1 ${currentView === view ? 'text-black font-bold' : 'text-gray-400'}`;
@@ -93,6 +102,14 @@ const Navbar = ({
         <span className="text-[10px]">{isLoggedIn ? 'My Page' : 'Login'}</span>
       </button>
       
+      {/* Admin Link (Conditional) */}
+      {isLoggedIn && userRole === "ADMIN" && (
+        <button onClick={() => setView(PageView.ADMIN_DASHBOARD)} className={navItemClass(PageView.ADMIN_DASHBOARD)}>
+            <ShieldCheckIcon className="w-6 h-6" />
+            <span className="text-[10px]">Admin</span>
+        </button>
+      )}
+
       {/* Logout simulation for demo */}
       {isLoggedIn && (
          <button onClick={() => { setAuthToken(null); setView(PageView.LOGIN); }} className="flex flex-col items-center justify-center w-full h-full space-y-1 text-gray-400">
@@ -278,8 +295,27 @@ const FeedPage = ({ user, setView }: { user: User; setView: (v: PageView) => voi
         ));
         alert("Admin pick status updated.");
     } catch (error) {
-        console.error("Failed to toggle admin pick:", error);
+      console.error("Failed to toggle admin pick:", error);
         alert("Failed to update admin pick status.");
+    }
+  };
+
+  const handleDeleteCreation = async (creationId: string) => {
+    if (user.role !== "ADMIN") {
+        alert("You must be an admin to delete creations.");
+        return;
+    }
+    if (!window.confirm("Are you sure you want to delete this creation?")) {
+        return;
+    }
+    try {
+        await deleteCreationAdmin(creationId);
+        // Remove from UI
+        setCreations(prevCreations => prevCreations.filter(c => c.id !== creationId));
+        alert("Creation deleted.");
+    } catch (error) {
+        console.error("Failed to delete creation:", error);
+        alert("Failed to delete creation.");
     }
   };
 
@@ -312,20 +348,6 @@ const FeedPage = ({ user, setView }: { user: User; setView: (v: PageView) => voi
             Latest
           </button>
         </div>
-        {/* Sub-filters removed as per requirement, or can be added later if needed */}
-        {/* <div className="flex gap-2 overflow-x-auto no-scrollbar px-2">
-          {['All', 'General', 'Basic', 'Stylish', 'Unique'].map(tag => (
-            <button
-              key={tag}
-              onClick={() => setSubFilter(tag)}
-              className={`px-4 py-1.5 rounded-full text-xs whitespace-nowrap border ${
-                subFilter === tag ? 'bg-black text-white border-black' : 'bg-white text-gray-600 border-gray-200'
-              }`}
-            >
-              {tag}
-            </button>
-          ))}
-        </div> */}
       </div>
 
       {/* Masonry Feed */}
@@ -342,14 +364,22 @@ const FeedPage = ({ user, setView }: { user: User; setView: (v: PageView) => voi
             
             {/* Overlay for details on hover */}
             <div className="absolute inset-0 flex flex-col justify-between p-3 opacity-0 group-hover:opacity-100 transition-opacity text-white text-xs font-medium bg-gradient-to-t from-black/60 to-transparent">
-                <div className="flex justify-end">
+                <div className="flex justify-end gap-2">
                     {user.role === "ADMIN" && (
+                        <>
                         <button 
                             onClick={(e) => { e.stopPropagation(); handleAdminPick(creation.id); }}
                             className={`p-1 rounded-full ${creation.is_picked_by_admin ? 'bg-green-500' : 'bg-gray-500'} bg-opacity-75 backdrop-blur-sm`}
                         >
                             <PlusIcon className="w-4 h-4" /> {/* Or a distinct 'Pick' icon */}
                         </button>
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); handleDeleteCreation(creation.id); }}
+                            className="p-1 rounded-full bg-red-500 bg-opacity-75 backdrop-blur-sm"
+                        >
+                            <TrashIcon className="w-4 h-4" />
+                        </button>
+                        </>
                     )}
                 </div>
                 <div className="flex items-center gap-2">
@@ -385,8 +415,8 @@ const FeedPage = ({ user, setView }: { user: User; setView: (v: PageView) => voi
           <div className="bg-white p-4 rounded-lg shadow-xl w-full max-w-md">
             <img src={selectedCreation.media_url} alt={selectedCreation.prompt} className="w-full rounded-lg mb-4" />
             <h3 className="text-xl font-bold mb-2">{selectedCreation.prompt}</h3>
-            <p className="text-sm text-gray-700 mb-2">by {selectedCreation.author_name || 'Anonymous'}</p>
-            <p className="text-xs text-gray-500">Gender: {selectedCreation.gender || 'N/A'}, Age Group: {selectedCreation.age_group || 'N/A'}</p>
+            <p className="text-sm text-gray-700 mb-2">Gender: {selectedCreation.gender || 'N/A'}, Age Group: {selectedCreation.age_group || 'N/A'}</p>
+            <p className="text-xs text-gray-500">Created: {new Date(selectedCreation.created_at).toLocaleString()}</p>
             <div className="flex items-center gap-2 mt-4">
                 <button onClick={(e) => { e.stopPropagation(); handleLike(selectedCreation.id, selectedCreation.is_liked || false); }}>
                     {selectedCreation.is_liked ? <HeartIconFilled className="w-6 h-6 text-red-500" /> : <HeartIcon className="w-6 h-6" />}
@@ -534,7 +564,7 @@ const GeneratePage = ({ onGenerate, setView, user }: { onGenerate: (file: File, 
          <button 
            disabled={!selectedFile || !prompt || !user.isLoggedIn}
            onClick={handleSubmit}
-           className={`w-full py-4 rounded-xl font-bold text-lg transition-all ${
+           className={`w-full py-4 rounded-xl font-bold text-lg transition-all ${ 
              (selectedFile && prompt && user.isLoggedIn) ? 'bg-black text-white shadow-lg' : 'bg-gray-200 text-gray-400 cursor-not-allowed'
            }`}
          >
@@ -623,7 +653,7 @@ const ResultPage = ({
         {/* Tags */}
         <div className="flex flex-wrap gap-2 mb-6">
           {/* Display raw tags from n8n_response if analysis.tags is undefined */}
-          {(result.tags && result.tags.length > 0 ? result.tags : ['No tags parsed']).map((tag, idx) => (
+          {(result.tags && result.tags.length > 0 ? result.tags : ['nothing']).map((tag, idx) => (
             <span key={idx} className="bg-gray-100 text-gray-800 px-3 py-1 rounded-lg text-xs font-medium">
               {tag}
             </span>
@@ -634,12 +664,12 @@ const ResultPage = ({
         <div className="space-y-4 mb-8">
           <div className="bg-gray-50 p-4 rounded-xl">
             <h3 className="font-bold text-sm mb-2">✨ Stylist's Note</h3>
-            <p className="text-sm text-gray-600 leading-relaxed">{result.analysis || 'No analysis parsed.'}</p>
+            <p className="text-sm text-gray-600 leading-relaxed">{result.analysis || 'nothing'}</p>
           </div>
           
           <div className="bg-stone-50 p-4 rounded-xl border border-stone-100">
              <h3 className="font-bold text-sm mb-2 text-stone-800">💡 Recommendation</h3>
-             <p className="text-sm text-stone-600 leading-relaxed">{result.recommendation || 'No recommendation parsed.'}</p>
+             <p className="text-sm text-gray-600 leading-relaxed">{result.recommendation || 'nothing'}</p>
           </div>
         </div>
 
@@ -907,10 +937,198 @@ const MyPage = ({ user, setView }: { user: User; setView: (v: PageView) => void 
                 <HeartIconFilled className="w-6 h-6 text-red-500" />
                 <span>{selectedCreation.likes_count} Likes</span>
             </div>
+            {user.role === "ADMIN" && (
+                <button 
+                    onClick={(e) => { e.stopPropagation(); handleAdminPick(selectedCreation.id); }}
+                    className={`mt-4 w-full py-2 rounded-lg text-sm font-medium ${selectedCreation.is_picked_by_admin ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-700'}`}
+                >
+                    {selectedCreation.is_picked_by_admin ? 'Unpick from Admin' : 'Pick for Admin'}
+                </button>
+            )}
             <button onClick={closeModal} className="mt-4 w-full bg-black text-white py-2 rounded-lg">Close</button>
           </div>
         )}
       </Modal>
+    </div>
+  );
+};
+
+const AdminDashboard = ({ setView, user }: { setView: (v: PageView) => void; user: User }) => {
+  const [users, setUsers] = useState<User[]>([]);
+  const [pickedCreations, setPickedCreations] = useState<Creation[]>([]);
+  const [stats, setStats] = useState({ users_count: 0 });
+  const [loading, setLoading] = useState({ users: true, creations: true, stats: true });
+
+  const fetchAdminData = async () => {
+    try {
+      setLoading(prev => ({ ...prev, users: true }));
+      const usersRes = await getAllUsers();
+      setUsers(usersRes);
+    } catch (error) {
+      console.error("Error fetching users:", error);
+      alert("Failed to fetch users.");
+    } finally {
+      setLoading(prev => ({ ...prev, users: false }));
+    }
+
+    try {
+      setLoading(prev => ({ ...prev, creations: true }));
+      const creationsRes = await getAdminPickedCreations();
+      setPickedCreations(creationsRes);
+    } catch (error) {
+      console.error("Error fetching picked creations:", error);
+      alert("Failed to fetch picked creations.");
+    } finally {
+      setLoading(prev => ({ ...prev, creations: false }));
+    }
+
+    try {
+      setLoading(prev => ({ ...prev, stats: true }));
+      const statsRes = await getUsersCountAdmin();
+      setStats({ users_count: statsRes.users_count });
+    } catch (error) {
+      console.error("Error fetching stats:", error);
+      alert("Failed to fetch stats.");
+    } finally {
+      setLoading(prev => ({ ...prev, stats: false }));
+    }
+  };
+
+  useEffect(() => {
+    if (user.role !== "ADMIN") {
+      alert("Access denied.");
+      setView(PageView.HOME);
+      return;
+    }
+    fetchAdminData();
+  }, [user.role, setView]);
+
+  const handleSetMainImage = async (creationId: string) => {
+    if (!window.confirm("Set this image as the main 'Discover' image on the Home page?")) return;
+    try {
+      await setMainCreation(creationId);
+      alert('Main image has been updated.');
+      // Optionally, we could provide visual feedback here
+    } catch (error) {
+      console.error('Error setting main image:', error);
+      alert('Failed to update main image.');
+    }
+  };
+
+  const handleUnpickImage = async (creationId: string) => {
+     if (!window.confirm("Remove this image from the 'Picked' list? (It will no longer appear on the home page)")) return;
+    try {
+      // We use toggleAdminPick, which will remove it if it's already picked.
+      await toggleAdminPick(creationId);
+      setPickedCreations(prev => prev.filter(c => c.id !== creationId));
+      alert('Image has been un-picked.');
+    } catch (error) {
+      console.error('Error unpicking image:', error);
+      alert('Failed to un-pick image.');
+    }
+  };
+
+  if (user.role !== "ADMIN") {
+    return null; // Render nothing if not admin, though useEffect should redirect
+  }
+
+  return (
+    <div className="p-4 pb-24">
+      <h1 className="text-2xl font-bold mb-6">Admin Dashboard</h1>
+
+      {/* Stats Section */}
+      <div className="mb-8">
+        <h2 className="text-lg font-semibold mb-3 text-gray-700">Site Statistics</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+            <h3 className="text-sm font-semibold text-gray-500">Total Users</h3>
+            {loading.stats ? <div className="h-8 bg-gray-200 rounded animate-pulse mt-1"></div> : <p className="text-3xl font-bold">{stats.users_count}</p>}
+          </div>
+          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+            <h3 className="text-sm font-semibold text-gray-500">Today's Visitors</h3>
+            <p className="text-3xl font-bold text-gray-300">N/A</p>
+          </div>
+          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+            <h3 className="text-sm font-semibold text-gray-500">Today's Views</h3>
+            <p className="text-3xl font-bold text-gray-300">N/A</p>
+          </div>
+        </div>
+      </div>
+      
+      {/* Daily Stats Table - Placeholder */}
+      <div className="mb-10">
+          <h2 className="text-lg font-semibold mb-3 text-gray-700">Daily Statistics</h2>
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 text-center">
+              <p className="text-sm text-gray-400">Daily statistics chart/table will be shown here when the API is ready.</p>
+          </div>
+      </div>
+
+      {/* Feed Management Section */}
+      <div className="mb-10">
+        <h2 className="text-lg font-semibold mb-3 text-gray-700">Feed Management (Editor's Picks)</h2>
+        {loading.creations ? (
+             <p className="text-sm text-gray-500">Loading picked images...</p>
+        ) : pickedCreations.length === 0 ? (
+            <p className="text-sm text-gray-500">No images have been picked yet.</p>
+        ) : (
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            {pickedCreations.map(creation => (
+                <div key={creation.id} className="relative group bg-gray-100 rounded-lg shadow-sm overflow-hidden aspect-square">
+                <img src={creation.media_url} alt={creation.prompt} className="w-full h-full object-cover" />
+                <div className="absolute inset-0 bg-black bg-opacity-60 flex flex-col items-center justify-center p-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                        onClick={() => handleSetMainImage(creation.id)}
+                        className="bg-blue-500 text-white px-3 py-1 rounded-md mb-2 text-xs font-semibold w-full hover:bg-blue-600 transition-colors"
+                    >
+                        Set as Main
+                    </button>
+                    <button
+                        onClick={() => handleUnpickImage(creation.id)}
+                        className="bg-red-500 text-white px-3 py-1 rounded-md text-xs font-semibold w-full hover:bg-red-600 transition-colors"
+                    >
+                        Un-pick
+                    </button>
+                </div>
+                </div>
+            ))}
+            </div>
+        )}
+      </div>
+      
+      {/* User Management Section */}
+      <div>
+        <h2 className="text-lg font-semibold mb-3 text-gray-700">User Management</h2>
+        <div className="bg-white rounded-xl shadow-sm overflow-x-auto border border-gray-100">
+          <table className="min-w-full text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="p-3 text-left font-semibold">ID</th>
+                <th className="p-3 text-left font-semibold">Username</th>
+                <th className="p-3 text-left font-semibold">Email</th>
+                <th className="p-3 text-left font-semibold">Role</th>
+                <th className="p-3 text-left font-semibold">Created At</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading.users ? (
+                <tr><td colSpan={5} className="p-4 text-center text-gray-500">Loading users...</td></tr>
+              ) : users.map((user, index) => (
+                <tr key={user.id} className={`border-t border-gray-100 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
+                  <td className="p-3 truncate" title={String(user.id)}>{String(user.id).substring(0,8)}...</td>
+                  <td className="p-3 font-medium">{user.name}</td>
+                  <td className="p-3 text-gray-600">{user.email}</td>
+                  <td className="p-3">
+                    <span className={`px-2 py-1 text-xs font-semibold rounded-full ${user.role === 'ADMIN' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-700'}`}>
+                        {user.role}
+                    </span>
+                  </td>
+                  <td className="p-3 text-gray-600">{new Date(user.created_at).toLocaleDateString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 };
@@ -1030,40 +1248,21 @@ export default function App() {
             clearInterval(intervalId);
             
             const creation = task.result.creation;
-            const n8nResponse = task.result.n8n_response;
-            
-            let parsedAnalysis = 'nothing'; // Default to 'nothing'
-            let parsedRecommendation = 'nothing'; // Default to 'nothing'
-            let parsedTags: string[] = [];
+            // The n8nResponse will now be the full object from the backend _extract_analysis_data
+            // which contains analysis_text, recommendation_text, tags_array
+            // No more frontend parsing needed here.
 
-            // Attempt to parse analysis, recommendation, and tags from the n8n text response
-            const textPart = n8nResponse?.candidates?.[0]?.content?.parts?.[0]?.text;
-            if (textPart) {
-              // Regex to extract Analysis section - more flexible with newlines/spaces
-              const analysisMatch = textPart.match(/\*\*Analysis:\*\*[\s]*(.*?)(?=\s*\n\n\*\*Recommendation:\*\*|\s*\n\n\*\*Tags:\*\*|$)/is);
-              if (analysisMatch && analysisMatch[1] && analysisMatch[1].trim().length > 0) {
-                parsedAnalysis = analysisMatch[1].trim();
-              }
-
-              // Regex to extract Recommendation section - more flexible with newlines/spaces
-              const recommendationMatch = textPart.match(/\*\*Recommendation:\*\*[\s]*(.*?)(?=\s*\n\n\*\*Tags:\*\*|$)/is);
-              if (recommendationMatch && recommendationMatch[1] && recommendationMatch[1].trim().length > 0) {
-                parsedRecommendation = recommendationMatch[1].trim();
-              }
-
-              // Regex to extract Tags section - more flexible with newlines/spaces
-              const tagsMatch = textPart.match(/\*\*Tags:\*\*[\s]*(.*)/is);
-              if (tagsMatch && tagsMatch[1] && tagsMatch[1].trim().length > 0) {
-                // Split by #, filter out empty strings, and trim each tag
-                parsedTags = tagsMatch[1].split('#').map(tag => tag.trim()).filter(tag => tag.length > 0);
-              }
-            }
+            // Frontend now directly uses fields from the 'creation' object, which
+            // are populated by backend parsing.
+            const finalAnalysis = creation.analysis_text || 'nothing';
+            const finalRecommendation = creation.recommendation_text || 'nothing';
+            const finalTags = (creation.tags_array && creation.tags_array.length > 0) ? creation.tags_array : [];
             
             setGenerationResult({
               creation: creation,
-              analysis: parsedAnalysis,
-              recommendation: parsedRecommendation,
-              tags: parsedTags
+              analysis: finalAnalysis,
+              recommendation: finalRecommendation,
+              tags: finalTags
             });
             setView(PageView.RESULT);
 
@@ -1124,10 +1323,11 @@ export default function App() {
       {currentView === PageView.RESULT && <ResultPage result={generationResult} onRetry={() => setView(PageView.GENERATE)} onFeedUpload={(creationId) => { alert(`Creation ${creationId} uploaded to feed!`); setView(PageView.FEED); }} />}
       {currentView === PageView.LOGIN && <LoginPage onEmailLogin={handleEmailLogin} onRegister={handleRegister} />}
       {currentView === PageView.MY_PAGE && <MyPage user={user} setView={setView} />}
+      {currentView === PageView.ADMIN_DASHBOARD && <AdminDashboard setView={setView} user={user} />}
 
       {/* Global Navbar (Only show on main navigation pages if logged in) */}
-      {(currentView === PageView.HOME || currentView === PageView.FEED || currentView === PageView.MY_PAGE) && (
-        <Navbar currentView={currentView} setView={setView} isLoggedIn={user.isLoggedIn} />
+      {(currentView === PageView.HOME || currentView === PageView.FEED || currentView === PageView.MY_PAGE || currentView === PageView.ADMIN_DASHBOARD) && (
+        <Navbar currentView={currentView} setView={setView} isLoggedIn={user.isLoggedIn} userRole={user.role} />
       )}
 
       {/* Modals */}

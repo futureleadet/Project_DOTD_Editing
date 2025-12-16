@@ -9,10 +9,11 @@ import httpx
 import io
 import base64
 import traceback # Import traceback module
-import uuid # Import uuid for unique filename generation
+import json # Import json module
 import os # Import os module for file operations
 import uuid # Import uuid for unique filename generation
-from typing import List, Dict, Any, Optional # Keep this line
+import re # Import re module for regex parsing
+from typing import List, Dict, Any, Optional
 
 router = APIRouter(prefix="/api", tags=["creations"])
 
@@ -20,6 +21,36 @@ router = APIRouter(prefix="/api", tags=["creations"])
 def b64_to_blob(b64_data: str, content_type: str = ''):
     byte_characters = base64.b64decode(b64_data)
     return io.BytesIO(byte_characters)
+
+# --- Helper function to extract analysis data from Gemini text ---
+def _extract_analysis_data(text_part: str) -> Dict[str, Any]:
+    analysis = "nothing"
+    recommendation = "nothing"
+    tags: List[str] = []
+
+    if text_part:
+        # Regex to extract Analysis section - more flexible with newlines/spaces
+        analysis_match = re.search(r'**Analysis:**[\s]*(.*?)(?=\s*\n\n**Recommendation:**|\s*\n\n**Tags:**|$)', text_part, re.DOTALL | re.IGNORECASE)
+        if analysis_match and analysis_match.group(1) and analysis_match.group(1).strip():
+            analysis = analysis_match.group(1).strip()
+
+        # Regex to extract Recommendation section - more flexible with newlines/spaces
+        recommendation_match = re.search(r'**Recommendation:**[\s]*(.*?)(?=\s*\n\n**Tags:**|$)', text_part, re.DOTALL | re.IGNORECASE)
+        if recommendation_match and recommendation_match.group(1) and recommendation_match.group(1).strip():
+            recommendation = recommendation_match.group(1).strip()
+
+        # Regex to extract Tags section - more flexible with newlines/spaces
+        tags_match = re.search(r'**Tags:**[\s]*(.*)', text_part, re.DOTALL | re.IGNORECASE)
+        if tags_match and tags_match.group(1) and tags_match.group(1).strip():
+            # Split by #, filter out empty strings, and trim each tag
+            tags = [tag.strip() for tag in tags_match.group(1).split('#') if tag.strip()]
+
+    return {
+        "analysis_text": analysis,
+        "recommendation_text": recommendation,
+        "tags_array": tags
+    }
+
 
 # --- Background Task Logic ---
 async def process_creation_task(
@@ -62,7 +93,7 @@ async def process_creation_task(
         async with httpx.AsyncClient(timeout=300.0) as client:
             try:
                 n8n_response = await client.post(webhook_url, data=httpx_data, files=httpx_files)
-                n8n_response.raise_for_status() # Raise HTTPStatusError for bad responses (4xx or 5xx)
+                n8n_response.raise_for_status() # Raise HTTPStatusError for bad responses (4xx or 5xx) 
                 
                 # Capture raw response text for debugging JSONDecodeError
                 n8n_response_text = n8n_response.text
@@ -101,13 +132,13 @@ async def process_creation_task(
         
         # Convert base64 to file-like object
         media_blob = b64_to_blob(media_data_b64, mime_type)
-        file_extension = '.' + mime_type.split('/')[-1] # Ensure file extension includes the leading dot
+        file_extension = '.' + mime_type.split('/')[-1]
         
-        # --- File Saving Logic (centralized) ---
+        # --- File Saving Logic (centralized for debugging) ---
         # NOTE: This file saving logic is now within process_creation_task,
         # and CreationsService.save_creation will be simplified to just save metadata.
         upload_dir = "app/static/uploads"
-        os.makedirs(upload_dir, exist_ok=True)
+        os.makedirs(upload_dir, exist_ok=True) # Ensure directory exists
         unique_filename = f"{uuid.uuid4()}{file_extension}"
         file_path_on_disk = os.path.join(upload_dir, unique_filename)
         media_url_for_db = f"/static/uploads/{unique_filename}"
@@ -122,6 +153,10 @@ async def process_creation_task(
             raise HTTPException(status_code=500, detail=f"Failed to save generated image to disk: {file_save_e}")
         # --- End File Saving Logic ---
 
+        # Extract analysis data from the Gemini text response
+        gemini_text_output = result.get("candidates", [{}])[0].get("content", {}).get("parts", [])[0].get("text", "")
+        extracted_data = _extract_analysis_data(gemini_text_output)
+
         # Save the creation metadata to our database using the media_url
         new_creation = await service.creations_repo.create_creation( # Directly use repo for simplicity here
             conn, 
@@ -131,12 +166,16 @@ async def process_creation_task(
             prompt, 
             gender=gender,
             age_group=age_group,
-            is_public=is_public
+            is_public=is_public,
+            analysis_text=extracted_data["analysis_text"],
+            recommendation_text=extracted_data["recommendation_text"],
+            tags_array=extracted_data["tags_array"]
         )
         print(f"DEBUG: Task {task_id} - Creation metadata saved. New creation ID: {new_creation.get('id')}")
         
-        task_manager.update_task_status(task_id, status="completed", result={"creation": new_creation,
-            "n8n_response": result
+        task_manager.update_task_status(task_id, status="completed", result={
+            "creation": new_creation,
+            "n8n_response": result # Still include full n8n_response for raw debug if needed
         })
         print(f"DEBUG: Task {task_id} - Status updated to completed.")
 

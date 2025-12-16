@@ -15,6 +15,7 @@ export interface User {
   avatar?: string; // Renamed from picture, optional
   role?: string; // Added for JWT payload
   isLoggedIn: boolean;
+  created_at?: string; // From backend, ISO string
 }
 
 export interface Creation {
