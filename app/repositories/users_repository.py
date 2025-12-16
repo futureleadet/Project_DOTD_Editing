@@ -13,13 +13,13 @@ class UserRepository:
         query = "SELECT * FROM users WHERE email = $1"
         return await conn.fetchrow(query, email)
 
-    async def create_user(self, conn: asyncpg.Connection, email: str, name: str, picture: str, role: str = "MEMBER"):
+    async def create_user(self, conn: asyncpg.Connection, email: str, name: str, picture: str = None, role: str = "MEMBER", hashed_password: str = None):
         query = """
-            INSERT INTO users (email, name, picture, role)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO users (email, name, picture, role, hashed_password)
+            VALUES ($1, $2, $3, $4, $5)
             RETURNING *
         """
-        return await conn.fetchrow(query, email, name, picture, role)
+        return await conn.fetchrow(query, email, name, picture, role, hashed_password)
 
     async def get_creations_by_user_id(self, conn: asyncpg.Connection, user_id: int) -> List[Dict[str, Any]]:
         """

@@ -11,6 +11,30 @@ app = FastAPI(title=settings.PROJECT_NAME, version=settings.PROJECT_VERSION)
 # Middleware
 app.add_middleware(LoggingMiddleware)
 
+# CORS Middleware
+# In production, this should be restricted to your frontend's actual domain.
+# For development, we allow common local development ports.
+origins = [
+    "http://localhost",
+    "http://localhost:5173", # Vite default
+    "http://localhost:3000", # Create React App default
+]
+
+# Allow specific origins if FRONTEND_ORIGIN env var is set (e.g., for production)
+if os.getenv("FRONTEND_ORIGIN"):
+    origins = [os.getenv("FRONTEND_ORIGIN")]
+
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"], # Allow all methods (GET, POST, PUT, DELETE, OPTIONS)
+    allow_headers=["*"], # Allow all headers (e.g., Authorization header for JWT)
+)
+
+
 # Routers
 app.include_router(auth_router.router)
 app.include_router(analysis_router.router)
@@ -32,3 +56,4 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     print("Application shutdown")
+##

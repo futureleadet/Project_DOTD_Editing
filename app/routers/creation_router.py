@@ -45,7 +45,7 @@ async def process_creation_task(
                 httpx_data[key] = str(value)
 
         # Call n8n webhook
-        webhook_url = 'http://192.168.0.19:5678/webhook/c6ebe062-d352-491d-8da3-a5fe2d3f6949'
+        webhook_url = 'http://n8n.nemone.store/webhook/c6ebe062-d352-491d-8da3-a5fe2d3f6949'
         async with httpx.AsyncClient(timeout=300.0) as client:
             n8n_response = await client.post(webhook_url, data=httpx_data, files=httpx_files)
             n8n_response.raise_for_status()
@@ -81,7 +81,11 @@ async def process_creation_task(
             UploadFile(filename=f"upload.{file_extension}", file=media_blob)
         )
         
-        task_manager.update_task_status(task_id, status="completed", result=new_creation)
+        
+        task_manager.update_task_status(task_id, status="completed", result={
+            "creation": new_creation,
+            "n8n_response": result
+        })
 
     except Exception as e:
         print(f"Task {task_id} failed: {e}")
@@ -127,8 +131,8 @@ async def create_task(
         process_creation_task, task_id, form_data, user_id, service, db_connection_string
     )
     
-    # Redirect to the result page
-    return RedirectResponse(url=f"/result/{task_id}", status_code=303)
+    # Return task ID immediately. Frontend will poll for status.
+    return {"task_id": task_id}
 
 
 @router.get("/task_status/{task_id}")

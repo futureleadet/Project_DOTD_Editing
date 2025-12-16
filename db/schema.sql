@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     email VARCHAR(255) UNIQUE NOT NULL,
+    hashed_password VARCHAR(255) NULL,
     name VARCHAR(255),
     picture VARCHAR(512),
     role VARCHAR(50) DEFAULT 'MEMBER',
@@ -24,3 +25,5 @@ CREATE TABLE IF NOT EXISTS creations (
     prompt TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE users ADD COLUMN hashed_password VARCHAR(255) NULL;

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { PageView, User, FeedItem, GenerationResult } from './types';
-import { analyzeFashionImage } from './services/geminiService';
+import { createGenerationTask, getTaskStatus, loginWithEmail, registerWithEmail, setAuthToken, fetchCurrentUser } from './services/apiService';
 import { 
   HomeIcon, 
   MagnifyingGlassIcon, 
@@ -12,6 +12,7 @@ import {
   EllipsisHorizontalIcon,
   ExclamationTriangleIcon
 } from '@heroicons/react/24/outline';
+
 
 // --- COMPONENTS DEFINED IN-FILE FOR SIMPLICITY AS REQUESTED ---
 
@@ -427,21 +428,47 @@ const ResultPage = ({
   );
 };
 
-// 7. Login Page
-const LoginPage = ({ onLogin }: { onLogin: () => void }) => {
+// 7. Login Page (Refactored)
+const LoginPage = ({ onEmailLogin, onRegister }) => {
+  const [isLoginView, setIsLoginView] = useState(true);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [error, setError] = useState('');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (isLoginView) {
+      onEmailLogin(email, password).catch(err => setError(err.message));
+    } else {
+      onRegister(name, email, password)
+        .then(() => {
+          // On successful registration, switch to login view
+          setIsLoginView(true);
+          // Optionally clear fields
+          setPassword('');
+        })
+        .catch(err => setError(err.message));
+    }
+  };
+
   return (
     <div className="h-screen bg-white flex flex-col p-6 items-center justify-center">
       <div className="w-full max-w-sm">
         <h1 className="text-4xl font-black mb-2 tracking-tighter">DOTD.</h1>
-        <p className="text-gray-500 mb-12">Discover your daily outfit AI.</p>
+        <p className="text-gray-500 mb-8">
+          {isLoginView ? 'Log in to continue.' : 'Create an account.'}
+        </p>
         
-        <button 
-          onClick={onLogin}
+        {/* Google Login remains an option */}
+        <a 
+          href="/auth/login/google"
           className="w-full bg-white border border-gray-300 text-gray-700 py-3 rounded-lg font-medium flex items-center justify-center gap-3 mb-4 hover:bg-gray-50 transition-colors"
         >
           <img src="https://www.svgrepo.com/show/475656/google-color.svg" className="w-5 h-5" alt="Google" />
           Continue with Google
-        </button>
+        </a>
         
         <div className="flex items-center gap-4 my-6">
           <div className="h-px bg-gray-200 flex-1"></div>
@@ -449,36 +476,59 @@ const LoginPage = ({ onLogin }: { onLogin: () => void }) => {
           <div className="h-px bg-gray-200 flex-1"></div>
         </div>
 
-        <form onSubmit={(e) => { e.preventDefault(); onLogin(); }} className="space-y-4">
+        {error && <p className="text-red-500 text-xs text-center mb-4">{error}</p>}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {!isLoginView && (
+            <input 
+               type="text" 
+               placeholder="Name" 
+               value={name}
+               onChange={(e) => setName(e.target.value)}
+               required
+               className="w-full border border-gray-200 rounded-lg p-3 text-sm focus:ring-2 focus:ring-black outline-none"
+            />
+          )}
           <input 
              type="email" 
-             placeholder="Email address" 
+             placeholder="Email address"
+             value={email}
+             onChange={(e) => setEmail(e.target.value)}
+             required
              className="w-full border border-gray-200 rounded-lg p-3 text-sm focus:ring-2 focus:ring-black outline-none"
           />
           <input 
              type="password" 
              placeholder="Password" 
+             value={password}
+             onChange={(e) => setPassword(e.target.value)}
+             required
              className="w-full border border-gray-200 rounded-lg p-3 text-sm focus:ring-2 focus:ring-black outline-none"
           />
           
-          <div className="flex justify-between items-center text-xs">
-            <label className="flex items-center gap-2 text-gray-500">
-              <input type="checkbox" className="rounded border-gray-300" />
-              Keep me logged in
-            </label>
-            <span className="text-gray-400">Forgot password?</span>
-          </div>
+          {isLoginView && (
+            <div className="flex justify-between items-center text-xs">
+              <label className="flex items-center gap-2 text-gray-500">
+                <input type="checkbox" className="rounded border-gray-300" />
+                Keep me logged in
+              </label>
+              <span className="text-gray-400 cursor-pointer">Forgot password?</span>
+            </div>
+          )}
 
           <button 
             type="submit"
             className="w-full bg-black text-white py-4 rounded-lg font-bold text-sm mt-4 hover:opacity-90"
           >
-            Log In
+            {isLoginView ? 'Log In' : 'Create Account'}
           </button>
         </form>
         
-        <p className="text-center text-xs text-gray-400 mt-8">
-          By continuing, you agree to our Terms of Service.
+        <p className="text-center text-xs text-gray-400 mt-6">
+          {isLoginView ? "Don't have an account? " : "Already have an account? "}
+          <button onClick={() => { setIsLoginView(!isLoginView); setError(''); }} className="font-bold text-black hover:underline">
+            {isLoginView ? 'Sign Up' : 'Log In'}
+          </button>
         </p>
       </div>
     </div>
@@ -535,7 +585,7 @@ const MyPage = ({ user, setView }: { user: User, setView: (v: PageView) => void 
 // --- MAIN APP COMPONENT ---
 
 export default function App() {
-  const [currentView, setView] = useState<PageView>(PageView.HOME);
+  const [currentView, setView] = useState<PageView>(PageView.HOME); // Default to home
   const [user, setUser] = useState<User>({
     id: 'guest',
     name: 'Guest User',
@@ -545,46 +595,147 @@ export default function App() {
   const [reportModalOpen, setReportModalOpen] = useState(false);
   const [generationResult, setGenerationResult] = useState<GenerationResult | null>(null);
 
-  const handleLogin = () => {
-    setUser({
-      id: 'fashionista_kr',
-      name: 'Min-ji Kim',
-      avatar: 'https://picsum.photos/seed/minji/100',
-      isLoggedIn: true
-    });
-    setView(PageView.HOME);
+  useEffect(() => {
+    const handleOAuthCallback = async () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const code = urlParams.get('code');
+
+      if (code) {
+        // Clear the code from the URL to prevent re-processing and cleaner URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+
+        try {
+          // Make an API call to your backend's google_callback to exchange the code for a token
+          const response = await fetch(`/auth/rest/oauth2-credential/callback?code=${code}`);
+          if (!response.ok) {
+            throw new Error('Failed to exchange code for token');
+          }
+          const data = await response.json();
+          const access_token = data.access_token;
+          
+          if (access_token) {
+            setAuthToken(access_token);
+            const currentUser = await fetchCurrentUser();
+            if (currentUser) {
+              setUser({
+                id: currentUser.sub,
+                name: currentUser.name,
+                avatar: currentUser.picture,
+                isLoggedIn: true,
+              });
+              setView(PageView.HOME); // Navigate to home or dashboard after successful login
+            } else {
+                setAuthToken(null);
+                setUser({ ...user, isLoggedIn: false });
+                setView(PageView.LOGIN);
+            }
+          } else {
+            throw new Error('No access token received from backend');
+          }
+        } catch (error) {
+          console.error("Error during Google OAuth callback:", error);
+          alert("Google login failed. Please try again.");
+          setView(PageView.LOGIN); // Redirect to login on error
+        }
+      } else {
+        // If no code, proceed with normal session check
+        const checkCurrentUser = async () => {
+          const currentUser = await fetchCurrentUser();
+          if (currentUser) {
+            setUser({
+              id: currentUser.sub,
+              name: currentUser.name,
+              avatar: currentUser.picture,
+              isLoggedIn: true,
+            });
+            setView(PageView.HOME);
+          }
+        };
+        checkCurrentUser();
+      }
+    };
+
+    handleOAuthCallback();
+  }, []);
+
+  const handleEmailLogin = async (email, password) => {
+    const { access_token } = await loginWithEmail(email, password);
+    setAuthToken(access_token);
+    
+    // In a real app, you'd fetch user profile from a protected /users/me endpoint.
+    // For this demo, we'll decode the JWT to get user info.
+    // NOTE: This is insecure on the client-side for sensitive data, but fine for display data.
+    try {
+      const payload = JSON.parse(atob(access_token.split('.')[1]));
+      setUser({
+        id: payload.sub,
+        name: payload.name,
+        avatar: payload.picture,
+        isLoggedIn: true,
+      });
+      setView(PageView.HOME);
+    } catch(e) {
+      console.error("Error decoding token", e);
+      // Fallback to a generic user if token is malformed
+      setUser({ id: 'user', name: 'User', avatar: '', isLoggedIn: true });
+      setView(PageView.HOME);
+    }
+  };
+
+  const handleRegister = async (name, email, password) => {
+    await registerWithEmail(name, email, password);
+    // On success, show a message and let them log in.
+    alert('Registration successful! Please log in.');
   };
 
   const handleGenerate = async (file: File, prompt: string) => {
     setView(PageView.LOADING);
-    
-    // Convert file to base64
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onloadend = async () => {
-      const base64 = (reader.result as string).split(',')[1];
-      
-      try {
-        const analysis = await analyzeFashionImage(base64, prompt);
-        
-        // Simulating the "Generated Image" by just using the uploaded one or a placeholder
-        // In a real app, this would come from the Image Generation API
-        // For aesthetics, we use the original image or a "styled" placeholder
-        const resultImage = reader.result as string; 
 
-        setGenerationResult({
-          imageUrl: resultImage,
-          analysis: analysis.analysis,
-          recommendation: analysis.recommendation,
-          tags: analysis.tags
-        });
-        setView(PageView.RESULT);
-      } catch (err) {
-        console.error(err);
-        setView(PageView.GENERATE); // Fallback
-      }
-    };
+    try {
+      // 1. Create the task on the backend
+      // TODO: Add form fields for gender and age_group and pass them here
+      const { task_id } = await createGenerationTask(file, prompt, "female", "20s");
+
+      // 2. Start polling for the result
+      const intervalId = setInterval(async () => {
+        try {
+          const task = await getTaskStatus(task_id);
+
+          if (task.status === 'completed') {
+            clearInterval(intervalId);
+            
+            const creation = task.result.creation;
+            const analysis = task.result.n8n_response;
+            
+            setGenerationResult({
+              imageUrl: creation.media_url,
+              analysis: analysis.analysis,
+              recommendation: analysis.recommendation,
+              tags: analysis.tags
+            });
+            setView(PageView.RESULT);
+
+          } else if (task.status === 'failed') {
+            clearInterval(intervalId);
+            alert("Generation failed. Please try again.");
+            console.error("Task failed:", task.result);
+            setView(PageView.GENERATE);
+          }
+        } catch (pollError) {
+          clearInterval(intervalId);
+          console.error("Polling error:", pollError);
+          alert("An error occurred while checking the task status.");
+          setView(PageView.GENERATE);
+        }
+      }, 3000); // Poll every 3 seconds
+
+    } catch (createError) {
+      console.error("Create task error:", createError);
+      alert("Failed to start the generation task. Please try again.");
+      setView(PageView.GENERATE);
+    }
   };
+
 
   // Report Modal
   const ReportModal = () => (
@@ -619,10 +770,10 @@ export default function App() {
       {currentView === PageView.GENERATE && <GeneratePage onGenerate={handleGenerate} setView={setView} />}
       {currentView === PageView.LOADING && <LoadingPage />}
       {currentView === PageView.RESULT && <ResultPage result={generationResult} onRetry={() => setView(PageView.GENERATE)} onFeedUpload={() => {alert('Uploaded!'); setView(PageView.FEED)}} />}
-      {currentView === PageView.LOGIN && <LoginPage onLogin={handleLogin} />}
+      {currentView === PageView.LOGIN && <LoginPage onEmailLogin={handleEmailLogin} onRegister={handleRegister} />}
       {currentView === PageView.MY_PAGE && <MyPage user={user} setView={setView} />}
 
-      {/* Global Navbar (Only show on main navigation pages) */}
+      {/* Global Navbar (Only show on main navigation pages if logged in) */}
       {(currentView === PageView.HOME || currentView === PageView.FEED || currentView === PageView.MY_PAGE) && (
         <Navbar currentView={currentView} setView={setView} isLoggedIn={user.isLoggedIn} />
       )}

@@ -6,8 +6,16 @@ from app.services.users_service import UserService
 import asyncpg
 from typing import List, Dict, Any
 
-router = APIRouter(prefix="/user", tags=["user"])
+router = APIRouter(prefix="/users", tags=["users"])
 templates = Jinja2Templates(directory="app/templates")
+
+@router.get("/me", response_model=Dict[str, Any])
+async def get_current_active_user(user: dict = Depends(get_current_user)):
+    """
+    Retrieves the details of the currently authenticated user.
+    """
+    return user
+
 
 @router.get("/profile")
 async def user_profile(request: Request, user: dict = Depends(get_current_user), conn: asyncpg.Connection = Depends(get_db_connection)):

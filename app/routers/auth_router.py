@@ -1,20 +1,90 @@
 import os
 import httpx
-from fastapi import APIRouter, Depends, Request, HTTPException
+from fastapi import APIRouter, Depends, Request, HTTPException, status
 from fastapi.responses import RedirectResponse, JSONResponse
+from pydantic import BaseModel, EmailStr
+
 from app.dependencies.db_connection import get_db_connection
 from app.services.users_service import UserService
 from app.auth.jwt_handler import create_access_token
 import asyncpg
 
-router = APIRouter()
+# All routes in this file will be prefixed with /auth
+router = APIRouter(prefix="/auth", tags=["auth"])
+
+# --- Pydantic Models for Request Bodies ---
+
+class UserCreate(BaseModel):
+    email: EmailStr
+    password: str
+    name: str
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+
+# --- Email/Password Authentication ---
+
+@router.post("/register")
+async def register_user(
+    user_data: UserCreate, 
+    user_service: UserService = Depends(),
+    conn: asyncpg.Connection = Depends(get_db_connection)
+):
+    new_user = await user_service.register_new_user(
+        conn,
+        email=user_data.email,
+        password=user_data.password,
+        name=user_data.name
+    )
+    # Exclude password from the response
+    user_dict = dict(new_user)
+    del user_dict["hashed_password"]
+    return JSONResponse(status_code=status.HTTP_201_CREATED, content=user_dict)
+
+@router.post("/login")
+async def login_user(
+    form_data: UserLogin,
+    user_service: UserService = Depends(),
+    conn: asyncpg.Connection = Depends(get_db_connection)
+):
+    user = await user_service.authenticate_user(conn, email=form_data.email, password=form_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Create JWT
+    jwt_token = create_access_token({
+        "sub": str(user["id"]),
+        "email": user["email"],
+        "role": user["role"],
+        "name": user["name"],
+        "picture": user["picture"]
+    })
+
+    return {"access_token": jwt_token, "token_type": "bearer"}
+
+
+# --- Google OAuth2 Authentication ---
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI")
+FRONTEND_REDIRECT_URI = os.getenv("FRONTEND_REDIRECT_URI", "http://localhost:5173/") # Default for React dev server
+
+@router.get("/login/google")
+async def login_google():
+    return RedirectResponse(
+        f"https://accounts.google.com/o/oauth2/auth?response_type=code&client_id={GOOGLE_CLIENT_ID}&redirect_uri={GOOGLE_REDIRECT_URI}&scope=openid%20email%20profile&access_type=offline"
+    )
 
 @router.get("/rest/oauth2-credential/callback")
 async def google_callback(code: str, request: Request, user_service: UserService = Depends(), conn: asyncpg.Connection = Depends(get_db_connection)):
+    print("DEBUG: google_callback function entered - testing file update!")
     token_url = "https://oauth2.googleapis.com/token"
     data = {
         "code": code,
@@ -56,15 +126,12 @@ async def google_callback(code: str, request: Request, user_service: UserService
             "picture": user["picture"]
         })
         
-        # Redirect to dashboard with token (in a real app, maybe set cookie or redirect to a frontend that handles the token)
-        # For this MVP, we might just return the token or redirect to dashboard and let dashboard read it from URL?
-        # Or better, set it as a cookie.
-        response = RedirectResponse(url="/create")
-        response.set_cookie(key="access_token", value=f"Bearer {jwt_token}", httponly=True)
-        return response
-
-@router.get("/login/google")
-async def login_google():
-    return RedirectResponse(
-        f"https://accounts.google.com/o/oauth2/auth?response_type=code&client_id={GOOGLE_CLIENT_ID}&redirect_uri={GOOGLE_REDIRECT_URI}&scope=openid%20email%20profile&access_type=offline"
-    )
+        # Instead of redirecting and setting cookie, return JSON response
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "access_token": jwt_token,
+                "token_type": "bearer",
+                "redirect_to": f"{FRONTEND_REDIRECT_URI}#access_token={jwt_token}" # Still provide redirect URL for client-side navigation
+            }
+        )

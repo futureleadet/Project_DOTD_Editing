@@ -36,3 +36,9 @@ export interface GeminiAnalysisResponse {
   recommendation: string;
   tags: string[];
 }
+
+export interface Task {
+    id: string;
+    status: 'pending' | 'processing' | 'completed' | 'failed';
+    result: any; // This will contain the creation data or an error message
+}
