@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, BackgroundTasks, Request, status
 from fastapi.responses import RedirectResponse
 from app.services.creations_service import CreationsService
-from app.dependencies.auth import get_current_user, get_current_admin
+from app.dependencies.auth import get_current_user, get_current_admin, get_optional_user
 from app.dependencies.db_connection import get_db_connection
 from app.services import task_manager
 import asyncpg
@@ -77,6 +77,16 @@ async def process_creation_task(
         age_group = form_data.pop("age_group", None)
         is_public = form_data.pop("is_public", True) # Default to True
 
+        # Add gender and age_group to the data to be sent to the webhook
+        if gender:
+            httpx_data['gender'] = gender
+        if age_group:
+            httpx_data['age_group'] = age_group
+        
+        # Add image content_type to httpx_data if image is present
+        if 'image' in form_data and form_data['image']:
+            httpx_data['content_type'] = form_data['image']['content_type']
+
         for key, value in form_data.items():
             if key == 'image' and value:
                 # For image, prepare it for 'files' parameter
@@ -86,7 +96,9 @@ async def process_creation_task(
                 httpx_data[key] = str(value)
 
         # Call n8n webhook
-        webhook_url = 'http://n8n.nemone.store/webhook/c6ebe062-d352-491d-8da3-a5fe2d3f6949'
+        # webhook_url = 'http://n8n.nemone.store/webhook/c6ebe062-d352-491d-8da3-a5fe2d3f6949'
+        webhook_url = 'https://n8n.jhsol.shop/webhook/b89c411e-d419-46dc-ad19-dc78676a8d1d'
+        
         
         print(f"DEBUG: Task {task_id} - Attempting httpx.post to n8n webhook: {webhook_url}")
         
@@ -260,7 +272,7 @@ async def get_feed(
     sort_by: str = "latest", # 'latest' or 'popular'
     limit: int = 10,
     offset: int = 0,
-    current_user: Optional[dict] = Depends(get_current_user) # Optional for feed, to check if liked
+    current_user: Optional[dict] = Depends(get_optional_user) # Optional for feed, to check if liked
 ):
     """
     Returns a list of all public creations for the feed, with sorting and pagination.

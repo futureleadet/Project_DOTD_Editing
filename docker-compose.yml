@@ -1,12 +1,4 @@
 services:
-  # Frontend builder
-  frontend-builder:
-    image: node:20-slim
-    working_dir: /app/react
-    volumes:
-      - ./:/app
-    command: sh -c "npm install && npm run build"
-
   # PostgreSQL with pgvector
   db_postgresql:
     image: pgvector/pgvector:pg16
@@ -60,10 +52,6 @@ services:
     depends_on:
       db_postgresql:
         condition: service_healthy
-      frontend-builder:
-        condition: service_completed_successfully
-    volumes:
-      - ./:/app
     stdin_open: true
     tty: true
     command: sleep infinity
