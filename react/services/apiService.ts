@@ -1,10 +1,16 @@
 // Service to interact with our FastAPI backend
 import { Task, Creation, User } from '../types';
 
-let token: string | null = null;
+// Initialize token from localStorage for persistence across page reloads.
+let token: string | null = localStorage.getItem('authToken');
 
 export const setAuthToken = (newToken: string | null) => {
     token = newToken;
+    if (newToken) {
+        localStorage.setItem('authToken', newToken);
+    } else {
+        localStorage.removeItem('authToken');
+    }
 };
 
 const getAuthHeaders = () => {

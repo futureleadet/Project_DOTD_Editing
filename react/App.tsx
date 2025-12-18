@@ -36,6 +36,16 @@ import {
 import { HeartIcon as HeartIconFilled } from '@heroicons/react/24/solid';
 
 
+// Helper function to decode Base64URL
+const decodeBase64Url = (str: string) => {
+  str = str.replace(/-/g, '+').replace(/_/g, '/');
+  while (str.length % 4) {
+    str += '=';
+  }
+  return atob(str);
+};
+
+
 // --- COMPONENTS DEFINED IN-FILE FOR SIMPLICITY AS REQUESTED ---
 
 // Generic Modal Component
@@ -132,18 +142,12 @@ const HomePage = ({ setView, user }: { setView: (v: PageView) => void; user: Use
       try {
         const creations = await getPickedCreations();
         setPickedCreations(creations);
-      } catch (err) {
-        setError("Failed to load picked creations.");
-        console.error("Failed to load picked creations:", err);
       } finally {
         setLoading(false);
       }
     };
     fetchPicked();
   }, []);
-
-  // Removed activeTab and tabContent for simplicity as per requirement.
-  // The main call to action Generate Outfit button remains.
 
   return (
     <div className="pb-20 pt-4">
@@ -182,8 +186,7 @@ const HomePage = ({ setView, user }: { setView: (v: PageView) => void; user: Use
       {/* Admin Picks - 3x3 Grid */}
       <div className="mb-8">
         <div className="px-4 mb-4 flex justify-between items-end">
-          <h3 className="font-bold text-lg">Editor's Picks</h3> {/* Renamed from Staff Picks */}
-          {/* "View All" button removed as per requirement */}
+          <h3 className="font-bold text-lg">Editor's Picks</h3>
         </div>
         {loading && <p className="text-center text-gray-500">Loading editor's picks...</p>}
         {error && <p className="text-center text-red-500">{error}</p>}
@@ -209,7 +212,7 @@ const FeedPage = ({ user, setView }: { user: User; setView: (v: PageView) => voi
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [offset, setOffset] = useState(0);
-  const limit = 10; // Number of items to fetch per scroll
+  const limit = 10;
   const observer = useRef<IntersectionObserver>();
   const lastCreationElementRef = useRef<HTMLDivElement>(null);
   
@@ -230,14 +233,13 @@ const FeedPage = ({ user, setView }: { user: User; setView: (v: PageView) => voi
       setOffset(currentOffset + newCreations.length);
     } catch (error) {
       console.error("Failed to fetch feed creations:", error);
-      setHasMore(false); // Stop trying to load more if there's an error
+      setHasMore(false);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    // Reset and fetch when filter changes
     setCreations([]);
     setOffset(0);
     setHasMore(true);
@@ -252,13 +254,13 @@ const FeedPage = ({ user, setView }: { user: User; setView: (v: PageView) => voi
       if (entries[0].isIntersecting && hasMore) {
         fetchCreations(offset, filter);
       }
-    }, { threshold: 0.5 }); // Trigger when 50% of the last element is visible
+    }, { threshold: 0.5 });
 
     if (lastCreationElementRef.current) {
       observer.current.observe(lastCreationElementRef.current);
     }
     return () => observer.current?.disconnect();
-  }, [loading, hasMore, offset, filter]); // Rerun when these change
+  }, [loading, hasMore, offset, filter]);
 
   const handleLike = async (creationId: string, isLiked: boolean) => {
     if (!user.isLoggedIn) {
@@ -272,7 +274,6 @@ const FeedPage = ({ user, setView }: { user: User; setView: (v: PageView) => voi
       } else {
         await likeCreation(creationId);
       }
-      // Optimistically update UI
       setCreations(prevCreations => prevCreations.map(c => 
         c.id === creationId ? { ...c, is_liked: !isLiked, likes_count: c.likes_count + (isLiked ? -1 : 1) } : c
       ));
@@ -289,7 +290,6 @@ const FeedPage = ({ user, setView }: { user: User; setView: (v: PageView) => voi
     }
     try {
         await toggleAdminPick(creationId);
-        // Optimistically update UI
         setCreations(prevCreations => prevCreations.map(c => 
             c.id === creationId ? { ...c, is_picked_by_admin: !c.is_picked_by_admin } : c
         ));
@@ -310,7 +310,6 @@ const FeedPage = ({ user, setView }: { user: User; setView: (v: PageView) => voi
     }
     try {
         await deleteCreationAdmin(creationId);
-        // Remove from UI
         setCreations(prevCreations => prevCreations.filter(c => c.id !== creationId));
         alert("Creation deleted.");
     } catch (error) {
@@ -329,10 +328,8 @@ const FeedPage = ({ user, setView }: { user: User; setView: (v: PageView) => voi
     setIsModalOpen(false);
   };
 
-
   return (
     <div className="pb-20 pt-4 px-2">
-      {/* Header Filters */}
       <div className="sticky top-0 bg-white z-10 py-2 mb-4">
         <div className="flex gap-4 mb-4 px-2 border-b border-gray-100 pb-2">
           <button 
@@ -350,7 +347,6 @@ const FeedPage = ({ user, setView }: { user: User; setView: (v: PageView) => voi
         </div>
       </div>
 
-      {/* Masonry Feed */}
       <div className="columns-2 gap-2 space-y-2">
         {creations.map((creation, index) => (
           <div 
@@ -362,7 +358,6 @@ const FeedPage = ({ user, setView }: { user: User; setView: (v: PageView) => voi
             <img src={creation.media_url} alt={creation.prompt} className="w-full h-auto object-cover rounded-lg" />
             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
             
-            {/* Overlay for details on hover */}
             <div className="absolute inset-0 flex flex-col justify-between p-3 opacity-0 group-hover:opacity-100 transition-opacity text-white text-xs font-medium bg-gradient-to-t from-black/60 to-transparent">
                 <div className="flex justify-end gap-2">
                     {user.role === "ADMIN" && (
@@ -371,7 +366,7 @@ const FeedPage = ({ user, setView }: { user: User; setView: (v: PageView) => voi
                             onClick={(e) => { e.stopPropagation(); handleAdminPick(creation.id); }}
                             className={`p-1 rounded-full ${creation.is_picked_by_admin ? 'bg-green-500' : 'bg-gray-500'} bg-opacity-75 backdrop-blur-sm`}
                         >
-                            <PlusIcon className="w-4 h-4" /> {/* Or a distinct 'Pick' icon */}
+                            <PlusIcon className="w-4 h-4" />
                         </button>
                         <button 
                             onClick={(e) => { e.stopPropagation(); handleDeleteCreation(creation.id); }}
@@ -390,7 +385,6 @@ const FeedPage = ({ user, setView }: { user: User; setView: (v: PageView) => voi
                 </div>
             </div>
 
-            {/* Like button and count - always visible or on hover */}
             <div className="absolute bottom-2 left-2 flex items-center gap-1 text-white text-xs font-bold drop-shadow-md">
                 <button onClick={(e) => { e.stopPropagation(); handleLike(creation.id, creation.is_liked || false); }}>
                     {creation.is_liked ? <HeartIconFilled className="w-5 h-5 text-red-500" /> : <HeartIcon className="w-5 h-5" />}
@@ -399,7 +393,7 @@ const FeedPage = ({ user, setView }: { user: User; setView: (v: PageView) => voi
             </div>
             
             <button 
-              onClick={(e) => { e.stopPropagation(); /* onReport(); */ alert("Report functionality coming soon!"); }}
+              onClick={(e) => { e.stopPropagation(); alert("Report functionality coming soon!"); }}
               className="absolute top-2 right-2 text-white opacity-0 group-hover:opacity-100 transition-opacity p-1 bg-black/20 rounded-full backdrop-blur-sm"
             >
               <EllipsisHorizontalIcon className="w-5 h-5" />
@@ -460,7 +454,7 @@ const GeneratePage = ({ onGenerate, setView, user }: { onGenerate: (file: File, 
 
   const handleSubmit = () => {
     if (selectedFile && prompt) {
-        onGenerate(selectedFile, prompt, gender, ageGroup, isPublic);
+        onGenerate(selectedFile, prompt, gender, ageGroup, is_public);
     } else {
         alert("Please provide an image and a prompt.");
     }
@@ -475,7 +469,6 @@ const GeneratePage = ({ onGenerate, setView, user }: { onGenerate: (file: File, 
         <h2 className="text-2xl font-bold">Create DOTD</h2>
       </div>
       
-      {/* Prompt Input */}
       <div className="mb-6">
         <label htmlFor="prompt" className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">My Style Request</label>
         <textarea 
@@ -487,7 +480,6 @@ const GeneratePage = ({ onGenerate, setView, user }: { onGenerate: (file: File, 
         />
       </div>
 
-      {/* Gender Selection */}
       <div className="mb-6">
         <label htmlFor="gender" className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Gender</label>
         <select
@@ -502,7 +494,6 @@ const GeneratePage = ({ onGenerate, setView, user }: { onGenerate: (file: File, 
         </select>
       </div>
 
-      {/* Age Group Selection */}
       <div className="mb-6">
         <label htmlFor="ageGroup" className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Age Group</label>
         <select
@@ -519,7 +510,6 @@ const GeneratePage = ({ onGenerate, setView, user }: { onGenerate: (file: File, 
         </select>
       </div>
 
-      {/* Public/Private Toggle */}
       <div className="mb-6 flex items-center">
         <input
           type="checkbox"
@@ -533,7 +523,6 @@ const GeneratePage = ({ onGenerate, setView, user }: { onGenerate: (file: File, 
         </label>
       </div>
 
-      {/* Image Upload Area */}
       <div className="flex-1 mb-6">
         <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">My Photo</label>
         <div className={`border-2 border-dashed border-gray-200 rounded-xl h-full max-h-[400px] flex flex-col items-center justify-center relative overflow-hidden transition-all ${!preview ? 'bg-gray-50' : 'bg-white'}`}>
@@ -556,7 +545,6 @@ const GeneratePage = ({ onGenerate, setView, user }: { onGenerate: (file: File, 
         </div>
       </div>
 
-      {/* AI Caution & Action */}
       <div className="mt-auto pb-24">
          <p className="text-[10px] text-gray-400 text-center mb-3">
            AI generated results may vary. Please review terms of service regarding content.
@@ -618,12 +606,10 @@ const ResultPage = ({
 }) => {
   if (!result || !result.creation) return null;
 
-  // DEBUG: Log the result prop to inspect its structure
   console.log("ResultPage received result:", result);
 
   return (
     <div className="min-h-screen bg-white pb-24 animate-fade-in">
-      {/* Image Result */}
       <div className="relative w-full aspect-[3/4] bg-gray-100">
         <img src={result.creation.media_url} alt="Generated Outfit" className="w-full h-full object-cover" />
         <div className="absolute top-4 left-4 bg-white/90 backdrop-blur px-3 py-1 rounded-full border border-gray-200">
@@ -631,10 +617,8 @@ const ResultPage = ({
         </div>
       </div>
 
-      {/* Content */}
       <div className="p-5 -mt-6 bg-white rounded-t-3xl relative z-10 shadow-[-10px_-10px_30px_rgba(0,0,0,0.05)]">
         
-        {/* Header Actions */}
         <div className="flex justify-between items-start mb-6">
           <div>
             <h1 className="text-2xl font-bold mb-1">Style Analysis</h1>
@@ -650,9 +634,7 @@ const ResultPage = ({
           </div>
         </div>
 
-        {/* Tags */}
         <div className="flex flex-wrap gap-2 mb-6">
-          {/* Display raw tags from n8n_response if analysis.tags is undefined */}
           {(result.tags && result.tags.length > 0 ? result.tags : ['nothing']).map((tag, idx) => (
             <span key={idx} className="bg-gray-100 text-gray-800 px-3 py-1 rounded-lg text-xs font-medium">
               {tag}
@@ -660,7 +642,6 @@ const ResultPage = ({
           ))}
         </div>
 
-        {/* Analysis Text */}
         <div className="space-y-4 mb-8">
           <div className="bg-gray-50 p-4 rounded-xl">
             <h3 className="font-bold text-sm mb-2">✨ Stylist's Note</h3>
@@ -673,7 +654,6 @@ const ResultPage = ({
           </div>
         </div>
 
-        {/* Actions */}
         <div className="grid grid-cols-2 gap-3">
           <button 
             onClick={onRetry}
@@ -809,7 +789,7 @@ const MyPage = ({ user, setView }: { user: User; setView: (v: PageView) => void 
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [offset, setOffset] = useState(0);
-  const limit = 9; // Number of items to fetch per scroll
+  const limit = 9;
   const observer = useRef<IntersectionObserver>();
   const lastCreationElementRef = useRef<HTMLDivElement>(null);
 
@@ -830,7 +810,7 @@ const MyPage = ({ user, setView }: { user: User; setView: (v: PageView) => void 
       setOffset(currentOffset + newCreations.length);
     } catch (error) {
       console.error("Failed to fetch user creations:", error);
-      setHasMore(false); // Stop trying to load more if there's an error
+      setHasMore(false);
     } finally {
       setLoading(false);
     }
@@ -843,7 +823,7 @@ const MyPage = ({ user, setView }: { user: User; setView: (v: PageView) => void 
       setHasMore(true);
       fetchCreations(0, true);
     } else {
-      setCreations([]); // Clear creations if logged out
+      setCreations([]);
     }
   }, [user.isLoggedIn]);
 
@@ -904,7 +884,6 @@ const MyPage = ({ user, setView }: { user: User; setView: (v: PageView) => void 
 
       <div className="mb-6 border-b border-gray-100 flex gap-6">
         <button className="pb-2 border-b-2 border-black font-bold text-sm">My DOTD</button>
-        {/* <button className="pb-2 border-b-2 border-transparent text-gray-400 text-sm">Likes</button> */}
       </div>
 
       {!user.isLoggedIn && <p className="text-center text-gray-500">Please log in to see your creations.</p>}
@@ -1008,7 +987,6 @@ const AdminDashboard = ({ setView, user }: { setView: (v: PageView) => void; use
     try {
       await setMainCreation(creationId);
       alert('Main image has been updated.');
-      // Optionally, we could provide visual feedback here
     } catch (error) {
       console.error('Error setting main image:', error);
       alert('Failed to update main image.');
@@ -1018,7 +996,6 @@ const AdminDashboard = ({ setView, user }: { setView: (v: PageView) => void; use
   const handleUnpickImage = async (creationId: string) => {
      if (!window.confirm("Remove this image from the 'Picked' list? (It will no longer appear on the home page)")) return;
     try {
-      // We use toggleAdminPick, which will remove it if it's already picked.
       await toggleAdminPick(creationId);
       setPickedCreations(prev => prev.filter(c => c.id !== creationId));
       alert('Image has been un-picked.');
@@ -1029,14 +1006,13 @@ const AdminDashboard = ({ setView, user }: { setView: (v: PageView) => void; use
   };
 
   if (user.role !== "ADMIN") {
-    return null; // Render nothing if not admin, though useEffect should redirect
+    return null;
   }
 
   return (
     <div className="p-4 pb-24">
       <h1 className="text-2xl font-bold mb-6">Admin Dashboard</h1>
 
-      {/* Stats Section */}
       <div className="mb-8">
         <h2 className="text-lg font-semibold mb-3 text-gray-700">Site Statistics</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1055,7 +1031,6 @@ const AdminDashboard = ({ setView, user }: { setView: (v: PageView) => void; use
         </div>
       </div>
       
-      {/* Daily Stats Table - Placeholder */}
       <div className="mb-10">
           <h2 className="text-lg font-semibold mb-3 text-gray-700">Daily Statistics</h2>
           <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 text-center">
@@ -1063,7 +1038,6 @@ const AdminDashboard = ({ setView, user }: { setView: (v: PageView) => void; use
           </div>
       </div>
 
-      {/* Feed Management Section */}
       <div className="mb-10">
         <h2 className="text-lg font-semibold mb-3 text-gray-700">Feed Management (Editor's Picks)</h2>
         {loading.creations ? (
@@ -1095,7 +1069,6 @@ const AdminDashboard = ({ setView, user }: { setView: (v: PageView) => void; use
         )}
       </div>
       
-      {/* User Management Section */}
       <div>
         <h2 className="text-lg font-semibold mb-3 text-gray-700">User Management</h2>
         <div className="bg-white rounded-xl shadow-sm overflow-x-auto border border-gray-100">
@@ -1147,10 +1120,19 @@ export default function App() {
   const [reportModalOpen, setReportModalOpen] = useState(false);
   const [generationResult, setGenerationResult] = useState<GenerationResult | null>(null);
 
-  // Update user state when JWT payload is decoded
   const updateUserFromToken = (token: string) => {
     try {
-      const payload = JSON.parse(atob(token.split('.')[1]));
+      const payload = JSON.parse(decodeBase64Url(token.split('.')[1]));
+
+      // Check for token expiration
+      const currentTime = Date.now() / 1000; // current time in seconds
+      if (payload.exp && payload.exp < currentTime) {
+        console.error("Token expired. Logging out user.");
+        setUser({ id: 'guest', name: 'Guest User', isLoggedIn: false });
+        setAuthToken(null); // This will clear the token from localStorage
+        return;
+      }
+
       setUser({
         id: payload.sub,
         email: payload.email,
@@ -1160,7 +1142,7 @@ export default function App() {
         isLoggedIn: true,
       });
     } catch(e) {
-      console.error("Error decoding token", e);
+      console.error("Error decoding token or token invalid", e);
       setUser({ id: 'guest', name: 'Guest User', isLoggedIn: false });
       setAuthToken(null);
     }
@@ -1172,42 +1154,35 @@ export default function App() {
       const code = urlParams.get('code');
 
       if (code) {
-        // Clear the code from the URL to prevent re-processing and cleaner URL
-        window.history.replaceState({}, document.title, window.location.pathname);
-
         try {
-          // Make an API call to your backend's google_callback to exchange the code for a token
           const response = await fetch(`/auth/rest/oauth2-credential/callback?code=${code}`);
-          if (!response.ok) {
-            throw new Error('Failed to exchange code for token');
+          if (!response.ok) { 
+            const err = await response.json();
+            throw new Error(err.detail || 'Token exchange failed'); 
           }
+          
           const data = await response.json();
           const access_token = data.access_token;
           
           if (access_token) {
             setAuthToken(access_token);
-            updateUserFromToken(access_token); // Update user state from new token
-            setView(PageView.HOME); // Navigate to home or dashboard after successful login
+            updateUserFromToken(access_token);
+            setView(PageView.HOME);
+            window.history.replaceState({}, '', '/');
           } else {
-            throw new Error('No access token received from backend');
+            throw new Error('Backend did not return an access token.');
           }
         } catch (error) {
           console.error("Error during Google OAuth callback:", error);
-          alert("Google login failed. Please try again.");
-          setView(PageView.LOGIN); // Redirect to login on error
+          alert(`Google login failed: ${error.message}`);
+          window.history.replaceState({}, '', '/');
+          setView(PageView.LOGIN);
         }
       } else {
-        // If no code, proceed with normal session check
-        const checkCurrentUser = async () => {
-          const currentUser = await fetchCurrentUser();
-          if (currentUser) {
-            updateUserFromToken(currentUser.access_token || ''); // Assuming fetchCurrentUser returns {access_token: "..."}
-            // Or if currentUser is already the payload:
-            // setUser({ id: currentUser.sub, email: currentUser.email, name: currentUser.name, avatar: currentUser.picture, role: currentUser.role, isLoggedIn: true });
-            setView(PageView.HOME);
-          }
-        };
-        checkCurrentUser();
+        const token = localStorage.getItem('authToken');
+        if (token) {
+          updateUserFromToken(token);
+        }
       }
     };
 
@@ -1236,10 +1211,8 @@ export default function App() {
     setView(PageView.LOADING);
 
     try {
-      // 1. Create the task on the backend
       const { task_id } = await createGenerationTask(file, prompt, gender, age_group, is_public);
 
-      // 2. Start polling for the result
       const intervalId = setInterval(async () => {
         try {
           const task = await getTaskStatus(task_id);
@@ -1248,12 +1221,6 @@ export default function App() {
             clearInterval(intervalId);
             
             const creation = task.result.creation;
-            // The n8nResponse will now be the full object from the backend _extract_analysis_data
-            // which contains analysis_text, recommendation_text, tags_array
-            // No more frontend parsing needed here.
-
-            // Frontend now directly uses fields from the 'creation' object, which
-            // are populated by backend parsing.
             const finalAnalysis = creation.analysis_text || 'nothing';
             const finalRecommendation = creation.recommendation_text || 'nothing';
             const finalTags = (creation.tags_array && creation.tags_array.length > 0) ? creation.tags_array : [];
@@ -1268,7 +1235,6 @@ export default function App() {
 
           } else if (task.status === 'failed') {
             clearInterval(intervalId);
-            // alert("Generation failed. Please try again."); // Removed alert to allow console inspection
             console.error("Task failed:", task.result);
             setView(PageView.GENERATE);
           }
@@ -1278,7 +1244,7 @@ export default function App() {
           alert("An error occurred while checking the task status.");
           setView(PageView.GENERATE);
         }
-      }, 3000); // Poll every 3 seconds
+      }, 3000);
 
     } catch (createError) {
       console.error("Create task error:", createError);
